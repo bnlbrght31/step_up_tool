@@ -90,14 +90,32 @@ async def _bs_select(page: Page, btn_locator, value: str) -> str:
     if not options:
         return ""
     choice = _best_match_claude(value, options)
+
     await btn_locator.click()
-    await page.wait_for_timeout(350)
-    await btn_locator.evaluate("""(btn, choice) => {
+    await page.wait_for_timeout(400)
+
+    # dispatchEvent so Blazor's event system picks it up
+    clicked = await btn_locator.evaluate("""(btn, choice) => {
         const menu = btn.parentElement?.querySelector('.dropdown-menu');
-        const item = Array.from(menu?.querySelectorAll('a.dropdown-item') || [])
-            .find(a => a.textContent.trim() === choice);
-        if (item) item.click();
+        const items = Array.from(menu?.querySelectorAll('a.dropdown-item') || []);
+        const item = items.find(a => a.textContent.trim() === choice);
+        if (!item) return false;
+        item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        return true;
     }""", choice)
+
+    if not clicked:
+        # Fuzzy fallback: case-insensitive substring match
+        await btn_locator.evaluate("""(btn, choice) => {
+            const menu = btn.parentElement?.querySelector('.dropdown-menu');
+            const items = Array.from(menu?.querySelectorAll('a.dropdown-item') || []);
+            const lc = choice.toLowerCase();
+            const item = items.find(a => a.textContent.trim().toLowerCase().includes(lc));
+            if (!item) return false;
+            item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            return true;
+        }""", choice)
+
     await page.wait_for_timeout(500)
     return choice
 
@@ -108,8 +126,8 @@ async def _bs_select(page: Page, btn_locator, value: str) -> str:
 
 
 async def _rz_fill(input_locator, value: float | int):
-    """Fill a Radzen numeric input (triple-click to select all, then fill)."""
-    await input_locator.triple_click()
+    """Fill a Radzen numeric input (select all, then fill)."""
+    await input_locator.click(click_count=3)
     await input_locator.fill(str(value))
     await input_locator.press("Tab")
 
@@ -121,40 +139,29 @@ async def _rz_fill(input_locator, value: float | int):
 NOT_LISTED_PHRASES = ["not listed", "not found", "other provider", "other"]
 
 
-async def _handle_vendor(page: Page, vendor: str | None, index: int):
-    """
-    Select vendor from Bootstrap dropdown. Falls back to 'Provider not listed'
-    + freeform input if the vendor isn't in the list.
-    """
-    # Try common IDs for the vendor dropdown
-    vendor_btn = None
-    for vid in ("vendor", "provider", "payee"):
-        loc = page.locator(f"button#{vid}").nth(index)
-        if await loc.count():
-            vendor_btn = loc
-            break
-
-    if vendor_btn is None:
-        # Fall back: find a Bootstrap dropdown button near "Who did you pay?" label
-        vendor_btn = page.locator("button.dropdown-toggle.form-select").last
-
-    if not vendor_btn or not await vendor_btn.count():
+async def _handle_vendor_btn(page: Page, vendor: str | None, vendor_btn):
+    """Select vendor using the given Bootstrap dropdown button locator."""
+    options = await _bs_options(vendor_btn)
+    if not options:
         return
 
-    options = await _bs_options(vendor_btn)
     not_listed = next((o for o in options if any(p in o.lower() for p in NOT_LISTED_PHRASES)), None)
-    choice = _best_match_claude(vendor or "", options)
-    use_freeform = not_listed and (
-        any(p in choice.lower() for p in NOT_LISTED_PHRASES) or choice not in options
-    )
+    vendor_lower = (vendor or "").lower()
 
-    if use_freeform and not_listed:
+    substring_match = next((o for o in options if vendor_lower and vendor_lower in o.lower()), None)
+    if not substring_match:
+        substring_match = next((o for o in options if o.lower() in vendor_lower and len(o) > 3), None)
+
+    if substring_match:
+        await _bs_select(page, vendor_btn, substring_match)
+    elif not_listed:
         await _bs_select(page, vendor_btn, not_listed)
         await page.wait_for_timeout(600)
         freeform = page.locator("input[placeholder*='provider' i], input[placeholder*='vendor' i], input[placeholder*='name' i]").last
         if await freeform.count():
             await freeform.fill(vendor or "")
     else:
+        choice = _best_match_claude(vendor or "", options)
         await _bs_select(page, vendor_btn, choice)
 
 
@@ -301,49 +308,75 @@ async def _click_add_item(page: Page):
 
 
 async def _fill_item(page: Page, item: LineItem, index: int):
-    """Fill one reimbursement line item."""
+    """Fill one reimbursement line item.
+
+    The SUFS form starts each row with [category, vendor]. Selecting a category
+    inserts a type button between them: [category, type, vendor]. Selecting type
+    inserts description: [category, type, description, vendor].
+
+    We track positions via DOM element handles (not indices) so that repeated IDs
+    across multiple items don't cause mis-targeting.
+    """
     if index > 0:
         prev_count = await page.locator("#purchaseDate").count()
         await _click_add_item(page)
-        # Wait for the new row's date input to appear
         await page.wait_for_function(
             f"document.querySelectorAll('#purchaseDate').length > {prev_count}",
             timeout=5000,
         )
 
-    # --- Purchase date ---
     if item.purchase_date:
         await page.locator("#purchaseDate").nth(index).fill(_to_date_input(item.purchase_date))
 
-    # --- Category (Bootstrap dropdown) ---
+    bs_btns = page.locator("button.dropdown-toggle.form-select")
     cat_btn = page.locator("button#category").nth(index)
+
+    async def _next_btn_idx(anchor_el) -> int | None:
+        """Index of the button immediately after anchor in the full bs-btn list."""
+        return await page.evaluate("""(anchor) => {
+            const all = Array.from(document.querySelectorAll('button.dropdown-toggle.form-select'));
+            const idx = all.indexOf(anchor);
+            return (idx >= 0 && idx + 1 < all.length) ? idx + 1 : null;
+        }""", anchor_el)
+
+    # --- Category ---
+    count_before = await bs_btns.count()
+
     if item.category and await cat_btn.count():
         await _bs_select(page, cat_btn, item.category)
-        # Wait for Type dropdown to appear (it's dynamic)
         try:
             await page.wait_for_function(
-                f"document.querySelectorAll('button#type').length > {index}",
+                f"document.querySelectorAll('button.dropdown-toggle.form-select').length > {count_before}",
                 timeout=3000,
             )
         except Exception:
             pass
 
-    # --- Type ---
-    type_btn = page.locator("button#type").nth(index)
-    if item.type and await type_btn.count():
-        await _bs_select(page, type_btn, item.type)
-        try:
-            await page.wait_for_function(
-                f"document.querySelectorAll('button#description').length > {index}",
-                timeout=3000,
-            )
-        except Exception:
-            pass
+    # Get element handle AFTER category click (Blazor may re-render the button node)
+    cat_el = await cat_btn.element_handle()
 
-    # --- Description ---
-    desc_btn = page.locator("button#description").nth(index)
-    if item.description and await desc_btn.count():
-        await _bs_select(page, desc_btn, item.description)
+    # --- Type: button right after category in the DOM ---
+    type_el = None
+    if item.type and cat_el:
+        type_idx = await _next_btn_idx(cat_el)
+        if type_idx is not None:
+            count_before_type = await bs_btns.count()
+            await _bs_select(page, bs_btns.nth(type_idx), item.type)
+            # Re-fetch element handle in case node was replaced during selection
+            type_el = await bs_btns.nth(type_idx).element_handle()
+            try:
+                await page.wait_for_function(
+                    f"document.querySelectorAll('button.dropdown-toggle.form-select').length > {count_before_type}",
+                    timeout=3000,
+                )
+            except Exception:
+                pass
+
+    # --- Description: button right after type in the DOM ---
+    if item.description and type_el:
+        desc_idx = await _next_btn_idx(type_el)
+        if desc_idx is not None:
+            await _bs_select(page, bs_btns.nth(desc_idx), item.description)
 
     # --- Radzen numeric inputs ---
     if item.quantity is not None:
@@ -353,8 +386,21 @@ async def _fill_item(page: Page, item: LineItem, index: int):
     if item.tax is not None:
         await _rz_fill(page.locator('input[placeholder="Enter Additional Costs"]').nth(index), item.tax)
 
-    # --- Vendor ---
-    await _handle_vendor(page, item.vendor, index)
+    # --- Vendor: last button in this item's row ---
+    # Each row ends with vendor, which is the last button before the next row's category button
+    # (or last button overall for the last item). We find it using cat_el as the anchor.
+    if cat_el:
+        vendor_idx = await page.evaluate("""(catEl) => {
+            const all = Array.from(document.querySelectorAll('button.dropdown-toggle.form-select'));
+            const catIdx = all.indexOf(catEl);
+            if (catIdx < 0) return null;
+            for (let i = catIdx + 1; i < all.length; i++) {
+                if (all[i].id === 'category') return i - 1;
+            }
+            return all.length - 1;
+        }""", cat_el)
+        if vendor_idx is not None:
+            await _handle_vendor_btn(page, item.vendor, bs_btns.nth(vendor_idx))
 
     await page.wait_for_timeout(400)
 
