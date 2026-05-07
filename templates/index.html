@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SUFS Reimbursement Agent</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f9; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.1); padding: 40px; width: 100%; max-width: 480px; }
+    h1 { font-size: 1.5rem; color: #1a202c; margin-bottom: 8px; }
+    p.sub { color: #718096; font-size: .9rem; margin-bottom: 28px; }
+    .steps { background: #edf2f7; border-radius: 8px; padding: 16px 20px; margin-bottom: 28px; font-size: .85rem; color: #4a5568; line-height: 1.8; }
+    .steps ol { padding-left: 18px; }
+    label.upload-label { display: block; border: 2px dashed #cbd5e0; border-radius: 8px; padding: 32px; text-align: center; cursor: pointer; transition: border-color .2s; }
+    label.upload-label:hover { border-color: #4299e1; }
+    label.upload-label input { display: none; }
+    label.upload-label span { display: block; color: #718096; font-size: .9rem; margin-top: 8px; }
+    #file-name { margin-top: 10px; font-size: .85rem; color: #4a5568; font-weight: 600; }
+    .btn { display: block; width: 100%; margin-top: 20px; padding: 12px; background: #3182ce; color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: background .2s; }
+    .btn:hover { background: #2b6cb0; }
+    .btn:disabled { background: #a0aec0; cursor: not-allowed; }
+    .error { background: #fed7d7; color: #c53030; border-radius: 8px; padding: 12px 16px; font-size: .9rem; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>SUFS Reimbursement Agent</h1>
+    <p class="sub">Upload a receipt PDF and the agent will fill the form for you.</p>
+
+    <div class="steps">
+      <ol>
+        <li>Log in to Step Up for Students and open your reimbursement request</li>
+        <li>Upload your receipt on the SUFS site</li>
+        <li>Upload the same receipt below — the agent will extract every line item</li>
+        <li>Review and confirm which items to include</li>
+        <li>The agent fills the form; you submit</li>
+      </ol>
+    </div>
+
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+
+    <form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
+      <label class="upload-label" for="receipt-input">
+        <svg width="40" height="40" fill="none" stroke="#a0aec0" stroke-width="1.5" viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Click to select a receipt PDF</span>
+        <input type="file" id="receipt-input" name="receipt" accept=".pdf" required />
+      </label>
+      <div id="file-name"></div>
+      <button class="btn" type="submit" id="submit-btn" disabled>Parse Receipt</button>
+    </form>
+  </div>
+
+  <script>
+    const input = document.getElementById('receipt-input');
+    const label = document.getElementById('file-name');
+    const btn = document.getElementById('submit-btn');
+    input.addEventListener('change', () => {
+      if (input.files.length) {
+        label.textContent = input.files[0].name;
+        btn.disabled = false;
+      }
+    });
+    document.getElementById('upload-form').addEventListener('submit', () => {
+      btn.textContent = 'Parsing…';
+      btn.disabled = true;
+    });
+  </script>
+</body>
+</html>

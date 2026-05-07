@@ -1,0 +1,11 @@
+CLAUDE.md
+.env
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+/tmp/
+*.pdf
+venv/
+.venv/
+form_selectors.json
