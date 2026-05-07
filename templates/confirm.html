@@ -7,150 +7,247 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f9; padding: 32px 16px; }
+    .page-header { max-width: 900px; margin: 0 auto 24px; }
     h1 { font-size: 1.4rem; color: #1a202c; margin-bottom: 6px; }
-    p.sub { color: #718096; font-size: .9rem; margin-bottom: 28px; }
-    .url-row { display: flex; gap: 10px; margin-bottom: 28px; align-items: center; }
+    p.sub { color: #718096; font-size: .9rem; }
+    .url-row { max-width: 900px; margin: 0 auto 20px; display: flex; gap: 10px; align-items: center; }
     .url-row label { font-size: .85rem; font-weight: 600; color: #4a5568; white-space: nowrap; }
     .url-row input { flex: 1; padding: 8px 12px; border: 1px solid #cbd5e0; border-radius: 6px; font-size: .9rem; }
-    .item-card { background: #fff; border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.08); padding: 20px 24px; margin-bottom: 16px; position: relative; }
+    .warning-banner { max-width: 900px; margin: 0 auto 20px; background: #fef3cd; border: 1px solid #f6c23e; border-radius: 8px; padding: 12px 16px; font-size: .88rem; color: #744210; }
+    .item-card { background: #fff; border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.08); padding: 20px 24px; margin: 0 auto 16px; max-width: 900px; }
     .item-card.excluded { opacity: .45; }
     .item-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
     .item-header input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; accent-color: #3182ce; }
     .item-number { font-weight: 700; color: #2d3748; font-size: 1rem; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
     .field label { display: block; font-size: .75rem; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
     .field input, .field select { width: 100%; padding: 7px 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: .88rem; background: #f7fafc; }
     .field input:focus, .field select:focus { outline: none; border-color: #4299e1; background: #fff; }
-    .actions { display: flex; gap: 14px; margin-top: 32px; justify-content: flex-end; }
+    .actions { max-width: 900px; margin: 32px auto 0; display: flex; gap: 14px; justify-content: flex-end; }
     .btn { padding: 11px 28px; border: none; border-radius: 8px; font-size: .95rem; font-weight: 600; cursor: pointer; transition: background .15s; }
     .btn-primary { background: #3182ce; color: #fff; }
     .btn-primary:hover { background: #2b6cb0; }
     .btn-secondary { background: #edf2f7; color: #2d3748; }
     .btn-secondary:hover { background: #e2e8f0; }
-    #status { margin-top: 16px; padding: 12px 16px; border-radius: 8px; font-size: .9rem; display: none; }
+    #status { max-width: 900px; margin: 16px auto 0; padding: 12px 16px; border-radius: 8px; font-size: .9rem; display: none; }
     #status.success { background: #c6f6d5; color: #276749; }
     #status.error { background: #fed7d7; color: #c53030; }
     #status.loading { background: #bee3f8; color: #2a4365; }
-    .warning-banner { background: #fef3cd; border: 1px solid #f6c23e; border-radius: 8px; padding: 12px 16px; margin-bottom: 24px; font-size: .88rem; color: #744210; }
   </style>
 </head>
 <body>
+
+<script>
+  const FORM_OPTIONS = {{ form_options_json | safe }};
+</script>
+
+<div class="page-header">
   <h1>Review Extracted Items</h1>
-  <p class="sub">Check each item, edit any fields if needed, then click <strong>Fill Form</strong>. The agent will fill but never submit.</p>
+  <p class="sub">Edit any fields, uncheck items to skip, then click <strong>Fill Form</strong>. The agent will never submit.</p>
+</div>
 
-  <div class="warning-banner">
-    ⚠ Make sure Chrome is running with remote debugging enabled and the SUFS form is open before clicking Fill Form.
-  </div>
+<div class="warning-banner">
+  ⚠ Make sure Chrome is running with remote debugging enabled and the SUFS form is open before clicking Fill Form.
+</div>
 
-  <div class="url-row">
-    <label for="form-url">Form URL (optional — used if no SUFS tab is already open):</label>
-    <input type="text" id="form-url" placeholder="https://apply.stepupforstudents.org/SubmitReimbursement/..." />
-  </div>
+<div class="url-row">
+  <label for="form-url">Form URL (optional — used if no SUFS tab is already open):</label>
+  <input type="text" id="form-url" placeholder="https://apply.stepupforstudents.org/SubmitReimbursement/..." />
+</div>
 
-  <div id="items-container">
-    {% for item in items %}
-    <div class="item-card" id="card-{{ loop.index0 }}" data-index="{{ loop.index0 }}">
-      <div class="item-header">
-        <input type="checkbox" id="include-{{ loop.index0 }}" checked onchange="toggleCard({{ loop.index0 }})" />
-        <span class="item-number">Item {{ loop.index }}</span>
-      </div>
-      <div class="grid">
-        <div class="field">
-          <label>Purchase Date</label>
-          <input type="text" data-field="purchase_date" value="{{ item.purchase_date or '' }}" placeholder="MM/DD/YYYY" />
-        </div>
-        <div class="field">
-          <label>Category</label>
-          <input type="text" data-field="category" value="{{ item.category or '' }}" />
-        </div>
-        <div class="field">
-          <label>Type</label>
-          <input type="text" data-field="type" value="{{ item.type or '' }}" />
-        </div>
-        <div class="field">
-          <label>Description</label>
-          <input type="text" data-field="description" value="{{ item.description or '' }}" />
-        </div>
-        <div class="field">
-          <label>Quantity</label>
-          <input type="number" data-field="quantity" value="{{ item.quantity or '' }}" min="0" step="1" />
-        </div>
-        <div class="field">
-          <label>Cost ($)</label>
-          <input type="number" data-field="cost" value="{{ item.cost or '' }}" min="0" step="0.01" />
-        </div>
-        <div class="field">
-          <label>Tax ($)</label>
-          <input type="number" data-field="tax" value="{{ item.tax or '' }}" min="0" step="0.01" />
-        </div>
-        <div class="field">
-          <label>Vendor</label>
-          <input type="text" data-field="vendor" value="{{ item.vendor or '' }}" />
-        </div>
-      </div>
+<div id="items-container">
+  {% for item in items %}
+  <div class="item-card" id="card-{{ loop.index0 }}" data-index="{{ loop.index0 }}">
+    <div class="item-header">
+      <input type="checkbox" id="include-{{ loop.index0 }}" checked onchange="toggleCard({{ loop.index0 }})" />
+      <span class="item-number">Item {{ loop.index }}</span>
     </div>
-    {% endfor %}
+    <div class="grid">
+
+      <div class="field">
+        <label>Purchase Date</label>
+        <input type="text" data-field="purchase_date" value="{{ item.purchase_date or '' }}" placeholder="MM/DD/YYYY" />
+      </div>
+
+      <div class="field">
+        <label>Category</label>
+        <select data-field="category" onchange="onCategoryChange({{ loop.index0 }}, this.value)" id="cat-{{ loop.index0 }}">
+          <option value="{{ item.category or '' }}">{{ item.category or '— loading —' }}</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Type</label>
+        <select data-field="type" onchange="onTypeChange({{ loop.index0 }}, this.value)" id="type-{{ loop.index0 }}">
+          <option value="{{ item.type or '' }}">{{ item.type or '— loading —' }}</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Description</label>
+        <select data-field="description" id="desc-{{ loop.index0 }}">
+          <option value="{{ item.description or '' }}">{{ item.description or '— loading —' }}</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Quantity</label>
+        <input type="number" data-field="quantity" value="{{ item.quantity or '' }}" min="0" step="1" />
+      </div>
+
+      <div class="field">
+        <label>Cost ($)</label>
+        <input type="number" data-field="cost" value="{{ item.cost or '' }}" min="0" step="0.01" />
+      </div>
+
+      <div class="field">
+        <label>Tax ($)</label>
+        <input type="number" data-field="tax" value="{{ item.tax or '' }}" min="0" step="0.01" />
+      </div>
+
+      <div class="field">
+        <label>Vendor</label>
+        <select data-field="vendor" id="vendor-{{ loop.index0 }}">
+          <option value="{{ item.vendor or '' }}">{{ item.vendor or '— loading —' }}</option>
+        </select>
+      </div>
+
+    </div>
   </div>
+  {% endfor %}
+</div>
 
-  <div class="actions">
-    <a href="/" class="btn btn-secondary">← Start Over</a>
-    <button class="btn btn-primary" onclick="submitItems()">Fill Form</button>
-  </div>
-  <div id="status"></div>
+<div class="actions">
+  <a href="/" class="btn btn-secondary">← Start Over</a>
+  <button class="btn btn-primary" onclick="submitItems()">Fill Form</button>
+</div>
+<div id="status"></div>
 
-  <script>
-    function toggleCard(index) {
-      const card = document.getElementById('card-' + index);
-      const checked = document.getElementById('include-' + index).checked;
-      card.classList.toggle('excluded', !checked);
+<script>
+// ---------------------------------------------------------------------------
+// Populate dropdowns from discovered form options
+// ---------------------------------------------------------------------------
+
+function populateSelect(selectEl, options, currentVal) {
+  selectEl.innerHTML = '';
+  options.forEach(opt => {
+    const o = document.createElement('option');
+    o.value = opt; o.textContent = opt;
+    if (opt === currentVal) o.selected = true;
+    selectEl.appendChild(o);
+  });
+  // If current value not in options, insert it as first option
+  if (currentVal && !options.includes(currentVal)) {
+    const o = document.createElement('option');
+    o.value = currentVal; o.textContent = currentVal + ' (extracted)';
+    o.selected = true;
+    selectEl.insertBefore(o, selectEl.firstChild);
+  }
+}
+
+function onCategoryChange(index, category) {
+  if (!FORM_OPTIONS) return;
+  const types = (FORM_OPTIONS.types || {})[category] || [];
+  const typeEl = document.getElementById('type-' + index);
+  populateSelect(typeEl, types, typeEl.value);
+  onTypeChange(index, typeEl.value);
+}
+
+function onTypeChange(index, type) {
+  if (!FORM_OPTIONS) return;
+  const catEl = document.getElementById('cat-' + index);
+  const key = catEl.value + '|' + type;
+  const descs = (FORM_OPTIONS.descriptions || {})[key] || [];
+  const descEl = document.getElementById('desc-' + index);
+  populateSelect(descEl, descs, descEl.value);
+}
+
+function initDropdowns() {
+  if (!FORM_OPTIONS) return;
+
+  const cards = document.querySelectorAll('.item-card');
+  cards.forEach(card => {
+    const index = parseInt(card.dataset.index);
+
+    // Category
+    const catEl = document.getElementById('cat-' + index);
+    const currentCat = catEl.value;
+    populateSelect(catEl, FORM_OPTIONS.categories || [], currentCat);
+
+    // Type (based on current category)
+    const typeEl = document.getElementById('type-' + index);
+    const currentType = typeEl.value;
+    const types = (FORM_OPTIONS.types || {})[catEl.value] || [];
+    populateSelect(typeEl, types, currentType);
+
+    // Description (based on current category + type)
+    const descEl = document.getElementById('desc-' + index);
+    const currentDesc = descEl.value;
+    const key = catEl.value + '|' + typeEl.value;
+    const descs = (FORM_OPTIONS.descriptions || {})[key] || [];
+    populateSelect(descEl, descs, currentDesc);
+
+    // Vendor
+    const vendorEl = document.getElementById('vendor-' + index);
+    const currentVendor = vendorEl.value;
+    populateSelect(vendorEl, FORM_OPTIONS.vendors || [], currentVendor);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', initDropdowns);
+
+// ---------------------------------------------------------------------------
+// Card toggle
+// ---------------------------------------------------------------------------
+
+function toggleCard(index) {
+  document.getElementById('card-' + index).classList.toggle(
+    'excluded', !document.getElementById('include-' + index).checked
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Collect & submit
+// ---------------------------------------------------------------------------
+
+function collectItems() {
+  return Array.from(document.querySelectorAll('.item-card')).map(card => {
+    const index = card.dataset.index;
+    const include = document.getElementById('include-' + index).checked;
+    const item = { include };
+    card.querySelectorAll('[data-field]').forEach(el => {
+      const key = el.dataset.field;
+      const val = el.value.trim();
+      item[key] = (['quantity', 'cost', 'tax'].includes(key) && val !== '')
+        ? parseFloat(val) : (val || null);
+    });
+    return item;
+  });
+}
+
+async function submitItems() {
+  const status = document.getElementById('status');
+  status.className = 'loading'; status.style.display = 'block';
+  status.textContent = 'Connecting to Chrome and filling form… please wait.';
+
+  try {
+    const res = await fetch('/fill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ form_url: document.getElementById('form-url').value.trim(), items: collectItems() })
+    });
+    const data = await res.json();
+    if (data.success) {
+      status.className = 'success';
+      status.textContent = `✓ ${data.filled} item(s) filled. Switch to Chrome, review everything, then submit.`;
+    } else {
+      status.className = 'error';
+      status.textContent = 'Error: ' + (data.error || 'Unknown error');
     }
-
-    function collectItems() {
-      const cards = document.querySelectorAll('.item-card');
-      return Array.from(cards).map(card => {
-        const index = card.dataset.index;
-        const include = document.getElementById('include-' + index).checked;
-        const item = { include };
-        card.querySelectorAll('[data-field]').forEach(el => {
-          const key = el.dataset.field;
-          const val = el.value.trim();
-          item[key] = (['quantity', 'cost', 'tax'].includes(key) && val !== '')
-            ? parseFloat(val)
-            : (val || null);
-        });
-        return item;
-      });
-    }
-
-    async function submitItems() {
-      const status = document.getElementById('status');
-      const items = collectItems();
-      const form_url = document.getElementById('form-url').value.trim();
-
-      status.className = 'loading';
-      status.style.display = 'block';
-      status.textContent = 'Connecting to Chrome and filling form… please wait.';
-
-      try {
-        const res = await fetch('/fill', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ form_url, items })
-        });
-        const data = await res.json();
-
-        if (data.success) {
-          status.className = 'success';
-          status.textContent = `✓ ${data.filled} item(s) filled. Switch to Chrome, review, and submit.`;
-        } else {
-          status.className = 'error';
-          status.textContent = 'Error: ' + (data.error || 'Unknown error');
-        }
-      } catch (e) {
-        status.className = 'error';
-        status.textContent = 'Network error: ' + e.message;
-      }
-    }
-  </script>
+  } catch (e) {
+    status.className = 'error'; status.textContent = 'Network error: ' + e.message;
+  }
+}
+</script>
 </body>
 </html>

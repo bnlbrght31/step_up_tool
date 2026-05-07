@@ -7,20 +7,35 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f9; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-    .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.1); padding: 40px; width: 100%; max-width: 480px; }
-    h1 { font-size: 1.5rem; color: #1a202c; margin-bottom: 8px; }
-    p.sub { color: #718096; font-size: .9rem; margin-bottom: 28px; }
-    .steps { background: #edf2f7; border-radius: 8px; padding: 16px 20px; margin-bottom: 28px; font-size: .85rem; color: #4a5568; line-height: 1.8; }
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.1); padding: 40px; width: 100%; max-width: 500px; }
+    h1 { font-size: 1.5rem; color: #1a202c; margin-bottom: 6px; }
+    p.sub { color: #718096; font-size: .9rem; margin-bottom: 24px; }
+    .steps { background: #edf2f7; border-radius: 8px; padding: 16px 20px; margin-bottom: 24px; font-size: .85rem; color: #4a5568; line-height: 1.8; }
     .steps ol { padding-left: 18px; }
+    .discover-section { border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+    .discover-section h2 { font-size: .95rem; color: #2d3748; margin-bottom: 6px; }
+    .discover-section p { font-size: .82rem; color: #718096; margin-bottom: 10px; }
+    .discover-row { display: flex; gap: 8px; align-items: center; }
+    .discover-row input { flex: 1; padding: 7px 10px; border: 1px solid #cbd5e0; border-radius: 6px; font-size: .85rem; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: .75rem; font-weight: 600; margin-left: 8px; }
+    .badge.done { background: #c6f6d5; color: #276749; }
+    .badge.pending { background: #fed7d7; color: #c53030; }
     label.upload-label { display: block; border: 2px dashed #cbd5e0; border-radius: 8px; padding: 32px; text-align: center; cursor: pointer; transition: border-color .2s; }
     label.upload-label:hover { border-color: #4299e1; }
     label.upload-label input { display: none; }
     label.upload-label span { display: block; color: #718096; font-size: .9rem; margin-top: 8px; }
     #file-name { margin-top: 10px; font-size: .85rem; color: #4a5568; font-weight: 600; }
-    .btn { display: block; width: 100%; margin-top: 20px; padding: 12px; background: #3182ce; color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: background .2s; }
-    .btn:hover { background: #2b6cb0; }
-    .btn:disabled { background: #a0aec0; cursor: not-allowed; }
+    .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: .9rem; font-weight: 600; cursor: pointer; transition: background .2s; }
+    .btn-primary { background: #3182ce; color: #fff; }
+    .btn-primary:hover { background: #2b6cb0; }
+    .btn-primary:disabled { background: #a0aec0; cursor: not-allowed; }
+    .btn-block { display: block; width: 100%; margin-top: 16px; padding: 12px; font-size: 1rem; }
+    .btn-outline { background: #fff; border: 1px solid #cbd5e0; color: #4a5568; }
+    .btn-outline:hover { background: #f7fafc; }
     .error { background: #fed7d7; color: #c53030; border-radius: 8px; padding: 12px 16px; font-size: .9rem; margin-bottom: 20px; }
+    #discover-status { margin-top: 8px; font-size: .82rem; }
+    #discover-status.ok { color: #276749; }
+    #discover-status.err { color: #c53030; }
   </style>
 </head>
 <body>
@@ -31,11 +46,28 @@
     <div class="steps">
       <ol>
         <li>Log in to Step Up for Students and open your reimbursement request</li>
-        <li>Upload your receipt on the SUFS site</li>
-        <li>Upload the same receipt below — the agent will extract every line item</li>
-        <li>Review and confirm which items to include</li>
-        <li>The agent fills the form; you submit</li>
+        <li>Upload your receipt on the SUFS site, then upload it below</li>
+        <li>Review extracted items and click <strong>Fill Form</strong></li>
+        <li>The agent fills the form — you submit</li>
       </ol>
+    </div>
+
+    <!-- Dropdown Discovery -->
+    <div class="discover-section">
+      <h2>
+        Form Options
+        {% if options_discovered %}
+          <span class="badge done">✓ Discovered</span>
+        {% else %}
+          <span class="badge pending">Not yet discovered</span>
+        {% endif %}
+      </h2>
+      <p>Run this once with the SUFS form open in Chrome to map all dropdown options. This makes filling much more reliable.</p>
+      <div class="discover-row">
+        <input type="text" id="discover-url" placeholder="Form URL (optional if tab is already open)" />
+        <button class="btn btn-outline" onclick="discoverOptions()">Discover</button>
+      </div>
+      <div id="discover-status"></div>
     </div>
 
     {% if error %}
@@ -49,24 +81,43 @@
         <input type="file" id="receipt-input" name="receipt" accept=".pdf" required />
       </label>
       <div id="file-name"></div>
-      <button class="btn" type="submit" id="submit-btn" disabled>Parse Receipt</button>
+      <button class="btn btn-primary btn-block" type="submit" id="submit-btn" disabled>Parse Receipt</button>
     </form>
   </div>
 
   <script>
     const input = document.getElementById('receipt-input');
-    const label = document.getElementById('file-name');
+    const fileLabel = document.getElementById('file-name');
     const btn = document.getElementById('submit-btn');
     input.addEventListener('change', () => {
-      if (input.files.length) {
-        label.textContent = input.files[0].name;
-        btn.disabled = false;
-      }
+      if (input.files.length) { fileLabel.textContent = input.files[0].name; btn.disabled = false; }
     });
     document.getElementById('upload-form').addEventListener('submit', () => {
-      btn.textContent = 'Parsing…';
-      btn.disabled = true;
+      btn.textContent = 'Parsing…'; btn.disabled = true;
     });
+
+    async function discoverOptions() {
+      const status = document.getElementById('discover-status');
+      const url = document.getElementById('discover-url').value.trim();
+      status.className = ''; status.textContent = 'Connecting to Chrome and reading dropdowns…';
+      try {
+        const res = await fetch('/discover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ form_url: url })
+        });
+        const data = await res.json();
+        if (data.success) {
+          status.className = 'ok';
+          const cats = data.options.categories.length;
+          status.textContent = `✓ Done — ${cats} categories mapped. Reload to update badge.`;
+        } else {
+          status.className = 'err'; status.textContent = 'Error: ' + data.error;
+        }
+      } catch (e) {
+        status.className = 'err'; status.textContent = 'Network error: ' + e.message;
+      }
+    }
   </script>
 </body>
 </html>

@@ -9,10 +9,9 @@ SETUP (one-time):
   Then log in to SUFS, navigate to your reimbursement form, and run the app.
 """
 
-import asyncio
 import base64
 import json
-import os
+from pathlib import Path
 
 import anthropic
 from playwright.async_api import Browser, Page, async_playwright
@@ -20,6 +19,7 @@ from playwright.async_api import Browser, Page, async_playwright
 from src.models import LineItem
 
 _client = anthropic.Anthropic()
+OPTIONS_FILE = Path("form_options.json")
 
 # ---------------------------------------------------------------------------
 # Dropdown helpers
@@ -37,12 +37,12 @@ Reply with ONLY the exact text of the best matching option — nothing else.
 If nothing fits, pick the closest option anyway."""
 
 
-async def _get_options(page: Page, select_locator) -> list[str]:
+async def _get_options(select_locator) -> list[str]:
     """Return non-placeholder option texts from a <select> element."""
     return await select_locator.evaluate(
         """el => Array.from(el.options)
              .map(o => o.text.trim())
-             .filter(t => t && !['select...', '-- select --', 'select one'].includes(t.toLowerCase()))"""
+             .filter(t => t && !['select...', '-- select --', 'select one', ''].includes(t.toLowerCase()))"""
     )
 
 
@@ -71,9 +71,9 @@ def _best_match_claude(extracted: str, options: list[str]) -> str:
     return msg.content[0].text.strip()
 
 
-async def _select_best(page: Page, select_locator, extracted: str | None) -> str:
+async def _select_best(select_locator, extracted: str | None) -> str:
     """Select the best-matching option in a <select>; return the chosen text."""
-    options = await _get_options(page, select_locator)
+    options = await _get_options(select_locator)
     if not options:
         return ""
     choice = _best_match_claude(extracted or "", options)
@@ -90,35 +90,33 @@ PROVIDER_NOT_LISTED_PHRASES = ["not listed", "not found", "other provider", "oth
 
 async def _handle_vendor(page: Page, vendor: str | None):
     """
-    Select vendor from dropdown. If vendor is not in the list (or Claude says
-    to use the free-form fallback), choose the 'Provider not listed' option
-    and type the vendor name into the text box that appears.
+    Select vendor from dropdown. Falls back to 'Provider not listed' + freeform
+    entry if the vendor isn't in the list.
     """
-    vendor_select = page.get_by_label("Vendor") or page.locator("select").filter(
-        has_text="Provider"
-    )
+    vendor_select = page.locator(
+        "select[id*='vendor' i], select[name*='vendor' i], select[id*='provider' i]"
+    ).first
 
-    options = await _get_options(page, vendor_select.first)
+    options = await _get_options(vendor_select)
     not_listed_options = [
         o for o in options if any(p in o.lower() for p in PROVIDER_NOT_LISTED_PHRASES)
     ]
 
     choice = _best_match_claude(vendor or "", options)
-
     use_freeform = (
         any(p in choice.lower() for p in PROVIDER_NOT_LISTED_PHRASES)
         or choice not in options
     )
 
     if use_freeform and not_listed_options:
-        await vendor_select.first.select_option(label=not_listed_options[0])
+        await vendor_select.select_option(label=not_listed_options[0])
         await page.wait_for_timeout(600)
-        freeform = page.get_by_placeholder("Provider Name") or page.locator(
-            "input[type='text']:visible"
+        freeform = page.locator(
+            "input[placeholder*='provider' i], input[placeholder*='vendor' i]"
         ).last
         await freeform.fill(vendor or "")
     else:
-        await vendor_select.first.select_option(label=choice)
+        await vendor_select.select_option(label=choice)
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +130,7 @@ The current value to enter is: {value}
 Identify the best element to interact with and return a JSON object:
 {{
   "action": "fill" | "select" | "click",
-  "selector": "<CSS selector or descriptive text>",
+  "selector": "<CSS selector>",
   "value": "<value to enter>"
 }}
 Return ONLY the JSON object."""
@@ -152,16 +150,9 @@ async def _vision_fallback(page: Page, field: str, value: str):
                 "content": [
                     {
                         "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": img_b64,
-                        },
+                        "source": {"type": "base64", "media_type": "image/png", "data": img_b64},
                     },
-                    {
-                        "type": "text",
-                        "text": VISION_PROMPT.format(field=field, value=value),
-                    },
+                    {"type": "text", "text": VISION_PROMPT.format(field=field, value=value)},
                 ],
             }
         ],
@@ -172,8 +163,8 @@ async def _vision_fallback(page: Page, field: str, value: str):
         raw = raw.split("```")[1].lstrip("json").strip()
     plan: dict = json.loads(raw)
 
-    selector = plan["selector"]
     action = plan.get("action", "fill")
+    selector = plan["selector"]
     val = plan.get("value", value)
 
     if action == "fill":
@@ -185,12 +176,90 @@ async def _vision_fallback(page: Page, field: str, value: str):
 
 
 # ---------------------------------------------------------------------------
+# CDP connection helper
+# ---------------------------------------------------------------------------
+
+
+async def _get_sufs_page(browser: Browser, form_url: str) -> Page:
+    """Return the open SUFS tab, or navigate to form_url in a new tab."""
+    for context in browser.contexts:
+        for pg in context.pages:
+            if "stepupforstudents.org" in pg.url:
+                return pg
+
+    if not form_url:
+        raise RuntimeError(
+            "No SUFS tab found and no form_url provided. Open the form in Chrome first."
+        )
+    ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
+    page = await ctx.new_page()
+    await page.goto(form_url)
+    await page.wait_for_load_state("networkidle")
+    return page
+
+
+# ---------------------------------------------------------------------------
+# Dropdown discovery
+# ---------------------------------------------------------------------------
+
+
+async def discover_form_options(form_url: str = "", cdp_port: int = 9222) -> dict:
+    """
+    Walk every category → type → description combination on the live form
+    and save the results to form_options.json.
+    """
+    async with async_playwright() as p:
+        browser: Browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
+        page = await _get_sufs_page(browser, form_url)
+
+        options_map: dict = {"categories": [], "types": {}, "descriptions": {}, "vendors": []}
+
+        cat_sel = page.locator("select[id*='category' i], select[name*='category' i]").first
+        type_sel = page.locator("select[id*='type' i], select[name*='type' i]").first
+        desc_sel = page.locator(
+            "select[id*='description' i], select[id*='desc' i], select[name*='description' i]"
+        ).first
+        vendor_sel = page.locator(
+            "select[id*='vendor' i], select[name*='vendor' i], select[id*='provider' i]"
+        ).first
+
+        categories = await _get_options(cat_sel)
+        options_map["categories"] = categories
+
+        for category in categories:
+            await cat_sel.select_option(label=category)
+            await page.wait_for_timeout(800)
+
+            types = await _get_options(type_sel)
+            options_map["types"][category] = types
+
+            for type_val in types:
+                await type_sel.select_option(label=type_val)
+                await page.wait_for_timeout(800)
+
+                descriptions = await _get_options(desc_sel)
+                options_map["descriptions"][f"{category}|{type_val}"] = descriptions
+
+        options_map["vendors"] = await _get_options(vendor_sel)
+
+        OPTIONS_FILE.write_text(json.dumps(options_map, indent=2))
+        await browser.close()
+        return options_map
+
+
+def load_form_options() -> dict | None:
+    """Load previously discovered form options, or None if not yet discovered."""
+    if OPTIONS_FILE.exists():
+        return json.loads(OPTIONS_FILE.read_text())
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Fill a single line item
 # ---------------------------------------------------------------------------
 
 
 async def _click_add_item(page: Page):
-    """Click the 'Add an Item' button and wait for the new section to appear."""
     candidates = [
         page.get_by_role("button", name="Add an Item"),
         page.get_by_role("link", name="Add an Item"),
@@ -206,71 +275,58 @@ async def _click_add_item(page: Page):
 
 
 async def _fill_item(page: Page, item: LineItem, index: int):
-    """Fill one reimbursement line item. index=0 means the form is already open."""
+    """Fill one reimbursement line item. index=0 means the first row is already open."""
     if index > 0:
         await _click_add_item(page)
 
-    # Grab all instances of repeated fields (one per item row)
     date_inputs = page.locator("input[type='date'], input[type='text'][placeholder*='date' i]")
-    qty_inputs = page.locator("input[placeholder*='quantity' i], input[id*='quantity' i], input[name*='quantity' i]")
-    cost_inputs = page.locator("input[placeholder*='cost' i], input[id*='cost' i], input[name*='cost' i], input[placeholder*='amount' i]")
-    tax_inputs = page.locator("input[placeholder*='tax' i], input[id*='tax' i], input[name*='tax' i]")
+    qty_inputs = page.locator(
+        "input[placeholder*='quantity' i], input[id*='quantity' i], input[name*='quantity' i]"
+    )
+    cost_inputs = page.locator(
+        "input[placeholder*='cost' i], input[id*='cost' i], input[name*='cost' i], input[placeholder*='amount' i]"
+    )
+    tax_inputs = page.locator(
+        "input[placeholder*='tax' i], input[id*='tax' i], input[name*='tax' i]"
+    )
     cat_selects = page.locator("select[id*='category' i], select[name*='category' i]")
     type_selects = page.locator("select[id*='type' i], select[name*='type' i]")
-    desc_selects = page.locator("select[id*='description' i], select[id*='desc' i], select[name*='description' i]")
+    desc_selects = page.locator(
+        "select[id*='description' i], select[id*='desc' i], select[name*='description' i]"
+    )
 
-    # --- Purchase date ---
-    if item.purchase_date and await date_inputs.count() > index:
+    async def safe_fill(locator_list, nth, value, field_name):
         try:
-            await date_inputs.nth(index).fill(item.purchase_date)
+            if await locator_list.count() > nth:
+                await locator_list.nth(nth).fill(str(value))
         except Exception:
-            await _vision_fallback(page, "Purchase Date", item.purchase_date)
+            await _vision_fallback(page, field_name, str(value))
 
-    # --- Category (cascade root) ---
-    if await cat_selects.count() > index:
+    async def safe_select(locator_list, nth, value, field_name):
         try:
-            await _select_best(page, cat_selects.nth(index), item.category)
-            await page.wait_for_timeout(700)  # let type dropdown populate
+            if await locator_list.count() > nth:
+                await _select_best(locator_list.nth(nth), value)
         except Exception:
-            await _vision_fallback(page, "Category", item.category or "")
+            await _vision_fallback(page, field_name, value or "")
 
-    # --- Type ---
-    if await type_selects.count() > index:
-        try:
-            await _select_best(page, type_selects.nth(index), item.type)
-            await page.wait_for_timeout(700)  # let description dropdown populate
-        except Exception:
-            await _vision_fallback(page, "Type", item.type or "")
+    if item.purchase_date:
+        await safe_fill(date_inputs, index, item.purchase_date, "Purchase Date")
 
-    # --- Description ---
-    if await desc_selects.count() > index:
-        try:
-            await _select_best(page, desc_selects.nth(index), item.description)
-        except Exception:
-            await _vision_fallback(page, "Description", item.description or "")
+    await safe_select(cat_selects, index, item.category, "Category")
+    await page.wait_for_timeout(700)
 
-    # --- Quantity ---
-    if item.quantity is not None and await qty_inputs.count() > index:
-        try:
-            await qty_inputs.nth(index).fill(str(item.quantity))
-        except Exception:
-            await _vision_fallback(page, "Quantity", str(item.quantity))
+    await safe_select(type_selects, index, item.type, "Type")
+    await page.wait_for_timeout(700)
 
-    # --- Cost ---
-    if item.cost is not None and await cost_inputs.count() > index:
-        try:
-            await cost_inputs.nth(index).fill(str(item.cost))
-        except Exception:
-            await _vision_fallback(page, "Cost", str(item.cost))
+    await safe_select(desc_selects, index, item.description, "Description")
 
-    # --- Tax ---
-    if item.tax is not None and await tax_inputs.count() > index:
-        try:
-            await tax_inputs.nth(index).fill(str(item.tax))
-        except Exception:
-            await _vision_fallback(page, "Tax", str(item.tax))
+    if item.quantity is not None:
+        await safe_fill(qty_inputs, index, item.quantity, "Quantity")
+    if item.cost is not None:
+        await safe_fill(cost_inputs, index, item.cost, "Cost")
+    if item.tax is not None:
+        await safe_fill(tax_inputs, index, item.tax, "Tax")
 
-    # --- Vendor ---
     try:
         await _handle_vendor(page, item.vendor)
     except Exception:
@@ -280,46 +336,18 @@ async def _fill_item(page: Page, item: LineItem, index: int):
 
 
 # ---------------------------------------------------------------------------
-# Public entry point
+# Public entry points
 # ---------------------------------------------------------------------------
 
 
 async def fill_form(form_url: str, items: list[LineItem], cdp_port: int = 9222):
-    """
-    Connect to an existing Chrome session via CDP and fill the reimbursement form.
-
-    Preconditions:
-    - Chrome launched with: open -na "Google Chrome" --args --remote-debugging-port=9222
-    - User is logged in to SUFS with the reimbursement form already open.
-    """
+    """Connect to existing Chrome via CDP and fill the reimbursement form."""
     async with async_playwright() as p:
-        browser: Browser = await p.chromium.connect_over_cdp(
-            f"http://localhost:{cdp_port}"
-        )
-
-        # Find the SUFS tab
-        page: Page | None = None
-        for context in browser.contexts:
-            for pg in context.pages:
-                if "stepupforstudents.org" in pg.url:
-                    page = pg
-                    break
-            if page:
-                break
-
-        if page is None:
-            if not form_url:
-                raise RuntimeError(
-                    "No SUFS tab found and no form_url provided. "
-                    "Open the form in Chrome first."
-                )
-            ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
-            page = await ctx.new_page()
-            await page.goto(form_url)
-            await page.wait_for_load_state("networkidle")
+        browser: Browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
+        page = await _get_sufs_page(browser, form_url)
 
         for i, item in enumerate(items):
             await _fill_item(page, item, i)
 
-        # Bring the tab to the foreground so the user can review
         await page.bring_to_front()
+        await browser.close()

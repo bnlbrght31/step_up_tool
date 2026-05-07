@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from werkzeug.utils import secure_filename
 
 load_dotenv()
 
-from src.browser_agent import fill_form
+from src.browser_agent import discover_form_options, fill_form, load_form_options
 from src.models import LineItem
 from src.receipt_parser import parse_receipt
 
@@ -25,7 +26,8 @@ def allowed_file(filename: str) -> bool:
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    form_options = load_form_options()
+    return render_template("index.html", options_discovered=form_options is not None)
 
 
 @app.route("/upload", methods=["POST"])
@@ -41,7 +43,7 @@ def upload():
     try:
         items = parse_receipt(str(filepath))
     except Exception as e:
-        return render_template("index.html", error=f"Failed to parse receipt: {e}")
+        return render_template("index.html", error=f"Failed to parse receipt: {e}", options_discovered=load_form_options() is not None)
 
     session["items"] = [item.to_dict() for item in items]
     return redirect(url_for("confirm"))
@@ -52,7 +54,26 @@ def confirm():
     items = session.get("items", [])
     if not items:
         return redirect(url_for("index"))
-    return render_template("confirm.html", items=items, enumerate=enumerate)
+    form_options = load_form_options()
+    return render_template(
+        "confirm.html",
+        items=items,
+        form_options_json=json.dumps(form_options) if form_options else "null",
+        enumerate=enumerate,
+    )
+
+
+@app.route("/discover", methods=["POST"])
+def discover():
+    data = request.get_json() or {}
+    form_url = data.get("form_url", "").strip()
+    cdp_port = int(os.environ.get("CDP_PORT", 9222))
+
+    try:
+        options = asyncio.run(discover_form_options(form_url=form_url, cdp_port=cdp_port))
+        return jsonify({"success": True, "options": options})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/fill", methods=["POST"])
@@ -75,4 +96,4 @@ def fill():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5050)
