@@ -1,12 +1,15 @@
 """
 Browser automation for filling SUFS reimbursement forms.
 
-Connects to an existing Chrome session via CDP, then fills each line item using
-a combination of Playwright's label/role selectors and Claude vision as fallback.
+The SUFS form uses Bootstrap dropdowns (button + dropdown-menu with a.dropdown-item),
+Radzen numeric inputs (rz-numeric-input), and standard HTML date/text inputs.
 
 SETUP (one-time):
-  macOS: open -na "Google Chrome" --args --remote-debugging-port=9222
-  Then log in to SUFS, navigate to your reimbursement form, and run the app.
+  Kill Chrome, then launch:
+  /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+      --remote-debugging-port=9222 \
+      --user-data-dir="$HOME/.sufs-agent-chrome"
+  Log in to SUFS, navigate to your reimbursement form, then run the app.
 """
 
 import base64
@@ -22,157 +25,137 @@ _client = anthropic.Anthropic()
 OPTIONS_FILE = Path("form_options.json")
 
 # ---------------------------------------------------------------------------
-# Dropdown helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 MATCH_PROMPT = """\
-You are matching a value extracted from a receipt to the closest option in a web form dropdown.
-
-Extracted value: {extracted}
-
+Match this receipt value to the closest option in a form dropdown.
+Receipt value: {extracted}
 Available options:
 {options}
-
-Reply with ONLY the exact text of the best matching option — nothing else.
-If nothing fits, pick the closest option anyway."""
-
-
-async def _get_options(select_locator) -> list[str]:
-    """Return non-placeholder option texts from a <select> element."""
-    return await select_locator.evaluate(
-        """el => Array.from(el.options)
-             .map(o => o.text.trim())
-             .filter(t => t && !['select...', '-- select --', 'select one', ''].includes(t.toLowerCase()))"""
-    )
+Reply with ONLY the exact text of the best matching option."""
 
 
 def _best_match_claude(extracted: str, options: list[str]) -> str:
-    """Use Claude Haiku to pick the best matching option text."""
     if not options:
         return ""
     if not extracted:
         return options[0]
     if extracted in options:
         return extracted
-
     msg = _client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=64,
-        messages=[
-            {
-                "role": "user",
-                "content": MATCH_PROMPT.format(
-                    extracted=extracted,
-                    options="\n".join(f"- {o}" for o in options),
-                ),
-            }
-        ],
+        messages=[{"role": "user", "content": MATCH_PROMPT.format(
+            extracted=extracted,
+            options="\n".join(f"- {o}" for o in options),
+        )}],
     )
     return msg.content[0].text.strip()
 
 
-async def _select_best(select_locator, extracted: str | None) -> str:
-    """Select the best-matching option in a <select>; return the chosen text."""
-    options = await _get_options(select_locator)
+def _to_date_input(date_str: str | None) -> str:
+    """Convert MM/DD/YYYY → YYYY-MM-DD for HTML date inputs."""
+    if not date_str:
+        return ""
+    try:
+        parts = date_str.replace("-", "/").split("/")
+        if len(parts) == 3:
+            if len(parts[2]) == 4:  # MM/DD/YYYY
+                return f"{parts[2]}-{parts[0].zfill(2)}-{parts[1].zfill(2)}"
+    except Exception:
+        pass
+    return date_str  # return as-is if already correct or unparseable
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap dropdown helpers
+# ---------------------------------------------------------------------------
+
+
+async def _bs_options(btn_locator) -> list[str]:
+    """Return non-placeholder option texts from a Bootstrap dropdown button."""
+    return await btn_locator.evaluate("""btn => {
+        const menu = btn.parentElement?.querySelector('.dropdown-menu');
+        if (!menu) return [];
+        return Array.from(menu.querySelectorAll('a.dropdown-item'))
+            .map(a => a.textContent.trim())
+            .filter(t => t && !/^select\\s/i.test(t));
+    }""")
+
+
+async def _bs_select(page: Page, btn_locator, value: str) -> str:
+    """Open a Bootstrap dropdown and click the best-matching option."""
+    options = await _bs_options(btn_locator)
     if not options:
         return ""
-    choice = _best_match_claude(extracted or "", options)
-    await select_locator.select_option(label=choice)
+    choice = _best_match_claude(value, options)
+    await btn_locator.click()
+    await page.wait_for_timeout(350)
+    await btn_locator.evaluate("""(btn, choice) => {
+        const menu = btn.parentElement?.querySelector('.dropdown-menu');
+        const item = Array.from(menu?.querySelectorAll('a.dropdown-item') || [])
+            .find(a => a.textContent.trim() === choice);
+        if (item) item.click();
+    }""", choice)
+    await page.wait_for_timeout(500)
     return choice
 
 
 # ---------------------------------------------------------------------------
-# Vendor handling
+# Radzen numeric input helper
 # ---------------------------------------------------------------------------
 
-PROVIDER_NOT_LISTED_PHRASES = ["not listed", "not found", "other provider", "other"]
+
+async def _rz_fill(input_locator, value: float | int):
+    """Fill a Radzen numeric input (triple-click to select all, then fill)."""
+    await input_locator.triple_click()
+    await input_locator.fill(str(value))
+    await input_locator.press("Tab")
 
 
-async def _handle_vendor(page: Page, vendor: str | None):
+# ---------------------------------------------------------------------------
+# Vendor handling (Bootstrap dropdown + optional freeform)
+# ---------------------------------------------------------------------------
+
+NOT_LISTED_PHRASES = ["not listed", "not found", "other provider", "other"]
+
+
+async def _handle_vendor(page: Page, vendor: str | None, index: int):
     """
-    Select vendor from dropdown. Falls back to 'Provider not listed' + freeform
-    entry if the vendor isn't in the list.
+    Select vendor from Bootstrap dropdown. Falls back to 'Provider not listed'
+    + freeform input if the vendor isn't in the list.
     """
-    vendor_select = page.locator(
-        "select[id*='vendor' i], select[name*='vendor' i], select[id*='provider' i]"
-    ).first
+    # Try common IDs for the vendor dropdown
+    vendor_btn = None
+    for vid in ("vendor", "provider", "payee"):
+        loc = page.locator(f"button#{vid}").nth(index)
+        if await loc.count():
+            vendor_btn = loc
+            break
 
-    options = await _get_options(vendor_select)
-    not_listed_options = [
-        o for o in options if any(p in o.lower() for p in PROVIDER_NOT_LISTED_PHRASES)
-    ]
+    if vendor_btn is None:
+        # Fall back: find a Bootstrap dropdown button near "Who did you pay?" label
+        vendor_btn = page.locator("button.dropdown-toggle.form-select").last
 
+    if not vendor_btn or not await vendor_btn.count():
+        return
+
+    options = await _bs_options(vendor_btn)
+    not_listed = next((o for o in options if any(p in o.lower() for p in NOT_LISTED_PHRASES)), None)
     choice = _best_match_claude(vendor or "", options)
-    use_freeform = (
-        any(p in choice.lower() for p in PROVIDER_NOT_LISTED_PHRASES)
-        or choice not in options
+    use_freeform = not_listed and (
+        any(p in choice.lower() for p in NOT_LISTED_PHRASES) or choice not in options
     )
 
-    if use_freeform and not_listed_options:
-        await vendor_select.select_option(label=not_listed_options[0])
+    if use_freeform and not_listed:
+        await _bs_select(page, vendor_btn, not_listed)
         await page.wait_for_timeout(600)
-        freeform = page.locator(
-            "input[placeholder*='provider' i], input[placeholder*='vendor' i]"
-        ).last
-        await freeform.fill(vendor or "")
+        freeform = page.locator("input[placeholder*='provider' i], input[placeholder*='vendor' i], input[placeholder*='name' i]").last
+        if await freeform.count():
+            await freeform.fill(vendor or "")
     else:
-        await vendor_select.select_option(label=choice)
-
-
-# ---------------------------------------------------------------------------
-# Vision fallback — used when label-based selectors fail
-# ---------------------------------------------------------------------------
-
-VISION_PROMPT = """\
-This is a screenshot of a web form. The user needs to fill in: {field}.
-The current value to enter is: {value}
-
-Identify the best element to interact with and return a JSON object:
-{{
-  "action": "fill" | "select" | "click",
-  "selector": "<CSS selector>",
-  "value": "<value to enter>"
-}}
-Return ONLY the JSON object."""
-
-
-async def _vision_fallback(page: Page, field: str, value: str):
-    """Take a screenshot and ask Claude vision how to fill a specific field."""
-    screenshot = await page.screenshot()
-    img_b64 = base64.standard_b64encode(screenshot).decode()
-
-    msg = _client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=256,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {"type": "base64", "media_type": "image/png", "data": img_b64},
-                    },
-                    {"type": "text", "text": VISION_PROMPT.format(field=field, value=value)},
-                ],
-            }
-        ],
-    )
-
-    raw = msg.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1].lstrip("json").strip()
-    plan: dict = json.loads(raw)
-
-    action = plan.get("action", "fill")
-    selector = plan["selector"]
-    val = plan.get("value", value)
-
-    if action == "fill":
-        await page.fill(selector, val)
-    elif action == "select":
-        await page.select_option(selector, label=val)
-    elif action == "click":
-        await page.click(selector)
+        await _bs_select(page, vendor_btn, choice)
 
 
 # ---------------------------------------------------------------------------
@@ -181,16 +164,21 @@ async def _vision_fallback(page: Page, field: str, value: str):
 
 
 async def _get_sufs_page(browser: Browser, form_url: str) -> Page:
-    """Return the open SUFS tab, or navigate to form_url in a new tab."""
+    """Return the open SUFS reimbursement tab, or navigate to form_url."""
+    all_sufs: list[Page] = []
     for context in browser.contexts:
         for pg in context.pages:
             if "stepupforstudents.org" in pg.url:
-                return pg
+                all_sufs.append(pg)
+
+    for pg in all_sufs:
+        if "apply.stepupforstudents.org" in pg.url or "SubmitReimbursement" in pg.url:
+            return pg
+    if all_sufs:
+        return all_sufs[0]
 
     if not form_url:
-        raise RuntimeError(
-            "No SUFS tab found and no form_url provided. Open the form in Chrome first."
-        )
+        raise RuntimeError("No SUFS tab found and no form_url provided. Open the form in Chrome first.")
     ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
     page = await ctx.new_page()
     await page.goto(form_url)
@@ -199,48 +187,97 @@ async def _get_sufs_page(browser: Browser, form_url: str) -> Page:
 
 
 # ---------------------------------------------------------------------------
-# Dropdown discovery
+# Form inspection (for debugging selector issues)
+# ---------------------------------------------------------------------------
+
+
+async def inspect_form_elements(cdp_port: int = 9222) -> dict:
+    async with async_playwright() as p:
+        browser: Browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
+        page = await _get_sufs_page(browser, "")
+
+        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await page.wait_for_timeout(800)
+
+        result = await page.evaluate("""() => {
+            // All Bootstrap dropdown buttons
+            const bsDropdowns = Array.from(document.querySelectorAll('button[data-bs-toggle="dropdown"]')).map(btn => ({
+                id: btn.id,
+                className: btn.className.slice(0, 80),
+                text: btn.textContent.trim().slice(0, 60),
+                options: Array.from(btn.parentElement?.querySelectorAll('a.dropdown-item') || [])
+                    .map(a => a.textContent.trim()).filter(t => t).slice(0, 8),
+            }));
+
+            // All inputs
+            const inputs = Array.from(document.querySelectorAll('input')).map(el => ({
+                type: el.type, id: el.id, placeholder: el.placeholder,
+                className: el.className.slice(0, 60),
+            }));
+
+            // All labels
+            const labels = Array.from(document.querySelectorAll('label')).map(el => ({
+                text: el.textContent.trim().slice(0, 50),
+                for: el.getAttribute('for') || '',
+            }));
+
+            // Add an Item button
+            const addButtons = Array.from(document.querySelectorAll('button'))
+                .filter(el => /add.*(item|expense)/i.test(el.textContent))
+                .map(el => ({ id: el.id, className: el.className.slice(0,60), text: el.textContent.trim() }));
+
+            return { url: location.href, bsDropdowns, inputs, labels, addButtons };
+        }""")
+
+        await page.screenshot(path="/tmp/sufs_form_inspect.png", full_page=True)
+        await browser.close()
+        return result
+
+
+# ---------------------------------------------------------------------------
+# Dropdown discovery (maps all category→type→description combos)
 # ---------------------------------------------------------------------------
 
 
 async def discover_form_options(form_url: str = "", cdp_port: int = 9222) -> dict:
-    """
-    Walk every category → type → description combination on the live form
-    and save the results to form_options.json.
-    """
+    """Walk every category→type→description combination and save to form_options.json."""
     async with async_playwright() as p:
         browser: Browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
         page = await _get_sufs_page(browser, form_url)
 
         options_map: dict = {"categories": [], "types": {}, "descriptions": {}, "vendors": []}
 
-        cat_sel = page.locator("select[id*='category' i], select[name*='category' i]").first
-        type_sel = page.locator("select[id*='type' i], select[name*='type' i]").first
-        desc_sel = page.locator(
-            "select[id*='description' i], select[id*='desc' i], select[name*='description' i]"
-        ).first
-        vendor_sel = page.locator(
-            "select[id*='vendor' i], select[name*='vendor' i], select[id*='provider' i]"
-        ).first
-
-        categories = await _get_options(cat_sel)
+        cat_btn = page.locator("button#category").first
+        categories = await _bs_options(cat_btn)
         options_map["categories"] = categories
 
         for category in categories:
-            await cat_sel.select_option(label=category)
+            await _bs_select(page, cat_btn, category)
             await page.wait_for_timeout(800)
 
-            types = await _get_options(type_sel)
+            type_btn = page.locator("button#type").first
+            if not await type_btn.count():
+                options_map["types"][category] = []
+                continue
+
+            types = await _bs_options(type_btn)
             options_map["types"][category] = types
 
             for type_val in types:
-                await type_sel.select_option(label=type_val)
+                await _bs_select(page, type_btn, type_val)
                 await page.wait_for_timeout(800)
 
-                descriptions = await _get_options(desc_sel)
-                options_map["descriptions"][f"{category}|{type_val}"] = descriptions
+                desc_btn = page.locator("button#description").first
+                if await desc_btn.count():
+                    descs = await _bs_options(desc_btn)
+                    options_map["descriptions"][f"{category}|{type_val}"] = descs
 
-        options_map["vendors"] = await _get_options(vendor_sel)
+        # Vendor options
+        for vid in ("vendor", "provider", "payee"):
+            loc = page.locator(f"button#{vid}").first
+            if await loc.count():
+                options_map["vendors"] = await _bs_options(loc)
+                break
 
         OPTIONS_FILE.write_text(json.dumps(options_map, indent=2))
         await browser.close()
@@ -248,7 +285,6 @@ async def discover_form_options(form_url: str = "", cdp_port: int = 9222) -> dic
 
 
 def load_form_options() -> dict | None:
-    """Load previously discovered form options, or None if not yet discovered."""
     if OPTIONS_FILE.exists():
         return json.loads(OPTIONS_FILE.read_text())
     return None
@@ -260,77 +296,65 @@ def load_form_options() -> dict | None:
 
 
 async def _click_add_item(page: Page):
-    candidates = [
-        page.get_by_role("button", name="Add an Item"),
-        page.get_by_role("link", name="Add an Item"),
-        page.locator("button, a").filter(has_text="Add an Item"),
-        page.locator("button, a").filter(has_text="Add Item"),
-    ]
-    for locator in candidates:
-        if await locator.count() > 0:
-            await locator.first.click()
-            await page.wait_for_timeout(1000)
-            return
-    raise RuntimeError("Could not find 'Add an Item' button on the page.")
+    await page.get_by_role("button", name="Add an Item").click()
+    await page.wait_for_timeout(1000)
 
 
 async def _fill_item(page: Page, item: LineItem, index: int):
-    """Fill one reimbursement line item. index=0 means the first row is already open."""
+    """Fill one reimbursement line item."""
     if index > 0:
+        prev_count = await page.locator("#purchaseDate").count()
         await _click_add_item(page)
+        # Wait for the new row's date input to appear
+        await page.wait_for_function(
+            f"document.querySelectorAll('#purchaseDate').length > {prev_count}",
+            timeout=5000,
+        )
 
-    date_inputs = page.locator("input[type='date'], input[type='text'][placeholder*='date' i]")
-    qty_inputs = page.locator(
-        "input[placeholder*='quantity' i], input[id*='quantity' i], input[name*='quantity' i]"
-    )
-    cost_inputs = page.locator(
-        "input[placeholder*='cost' i], input[id*='cost' i], input[name*='cost' i], input[placeholder*='amount' i]"
-    )
-    tax_inputs = page.locator(
-        "input[placeholder*='tax' i], input[id*='tax' i], input[name*='tax' i]"
-    )
-    cat_selects = page.locator("select[id*='category' i], select[name*='category' i]")
-    type_selects = page.locator("select[id*='type' i], select[name*='type' i]")
-    desc_selects = page.locator(
-        "select[id*='description' i], select[id*='desc' i], select[name*='description' i]"
-    )
-
-    async def safe_fill(locator_list, nth, value, field_name):
-        try:
-            if await locator_list.count() > nth:
-                await locator_list.nth(nth).fill(str(value))
-        except Exception:
-            await _vision_fallback(page, field_name, str(value))
-
-    async def safe_select(locator_list, nth, value, field_name):
-        try:
-            if await locator_list.count() > nth:
-                await _select_best(locator_list.nth(nth), value)
-        except Exception:
-            await _vision_fallback(page, field_name, value or "")
-
+    # --- Purchase date ---
     if item.purchase_date:
-        await safe_fill(date_inputs, index, item.purchase_date, "Purchase Date")
+        await page.locator("#purchaseDate").nth(index).fill(_to_date_input(item.purchase_date))
 
-    await safe_select(cat_selects, index, item.category, "Category")
-    await page.wait_for_timeout(700)
+    # --- Category (Bootstrap dropdown) ---
+    cat_btn = page.locator("button#category").nth(index)
+    if item.category and await cat_btn.count():
+        await _bs_select(page, cat_btn, item.category)
+        # Wait for Type dropdown to appear (it's dynamic)
+        try:
+            await page.wait_for_function(
+                f"document.querySelectorAll('button#type').length > {index}",
+                timeout=3000,
+            )
+        except Exception:
+            pass
 
-    await safe_select(type_selects, index, item.type, "Type")
-    await page.wait_for_timeout(700)
+    # --- Type ---
+    type_btn = page.locator("button#type").nth(index)
+    if item.type and await type_btn.count():
+        await _bs_select(page, type_btn, item.type)
+        try:
+            await page.wait_for_function(
+                f"document.querySelectorAll('button#description').length > {index}",
+                timeout=3000,
+            )
+        except Exception:
+            pass
 
-    await safe_select(desc_selects, index, item.description, "Description")
+    # --- Description ---
+    desc_btn = page.locator("button#description").nth(index)
+    if item.description and await desc_btn.count():
+        await _bs_select(page, desc_btn, item.description)
 
+    # --- Radzen numeric inputs ---
     if item.quantity is not None:
-        await safe_fill(qty_inputs, index, item.quantity, "Quantity")
+        await _rz_fill(page.locator('input[placeholder="Enter Quantity"]').nth(index), item.quantity)
     if item.cost is not None:
-        await safe_fill(cost_inputs, index, item.cost, "Cost")
+        await _rz_fill(page.locator('input[placeholder="Enter Cost per Item"]').nth(index), item.cost)
     if item.tax is not None:
-        await safe_fill(tax_inputs, index, item.tax, "Tax")
+        await _rz_fill(page.locator('input[placeholder="Enter Additional Costs"]').nth(index), item.tax)
 
-    try:
-        await _handle_vendor(page, item.vendor)
-    except Exception:
-        await _vision_fallback(page, "Vendor", item.vendor or "")
+    # --- Vendor ---
+    await _handle_vendor(page, item.vendor, index)
 
     await page.wait_for_timeout(400)
 

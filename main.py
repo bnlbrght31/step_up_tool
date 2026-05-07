@@ -9,7 +9,7 @@ from werkzeug.utils import secure_filename
 
 load_dotenv()
 
-from src.browser_agent import discover_form_options, fill_form, load_form_options
+from src.browser_agent import discover_form_options, fill_form, inspect_form_elements, load_form_options
 from src.models import LineItem
 from src.receipt_parser import parse_receipt
 
@@ -61,6 +61,16 @@ def confirm():
         form_options_json=json.dumps(form_options) if form_options else "null",
         enumerate=enumerate,
     )
+
+
+@app.route("/inspect", methods=["POST"])
+def inspect():
+    cdp_port = int(os.environ.get("CDP_PORT", 9222))
+    try:
+        elements = asyncio.run(inspect_form_elements(cdp_port=cdp_port))
+        return jsonify({"success": True, "elements": elements})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/discover", methods=["POST"])
