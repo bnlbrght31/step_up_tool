@@ -155,21 +155,35 @@ async def _handle_vendor_btn(page: Page, vendor: str | None, vendor_btn):
     if substring_match:
         await _bs_select(page, vendor_btn, substring_match)
     elif not_listed:
+        # Snapshot existing text inputs so we can detect the newly revealed freeform field
+        inputs_before = await page.evaluate("""() =>
+            Array.from(document.querySelectorAll('input[type=text], input:not([type])'))
+                .map(el => el.outerHTML.slice(0, 80))
+        """)
         await _bs_select(page, vendor_btn, not_listed)
         await page.wait_for_timeout(800)
-        # Try common placeholder patterns first, then fall back to any visible text input
-        freeform = page.locator(
-            "input[placeholder*='provider' i], "
-            "input[placeholder*='vendor' i], "
-            "input[placeholder*='name' i], "
-            "input[placeholder*='enter' i], "
-            "input[placeholder*='type' i]"
-        ).last
-        if not await freeform.count():
-            freeform = page.locator("input[type='text']").last
-        if await freeform.count():
-            await freeform.clear()
-            await freeform.fill(vendor or "")
+
+        # Find the input that wasn't there before
+        new_input = await page.evaluate("""(before) => {
+            const all = Array.from(document.querySelectorAll('input[type=text], input:not([type])'));
+            const newEl = all.find(el => !before.includes(el.outerHTML.slice(0, 80)));
+            if (newEl) { newEl.focus(); return true; }
+            return false;
+        }""", inputs_before)
+
+        if new_input:
+            # Fill whichever input now has focus
+            await page.keyboard.type(vendor or "")
+        else:
+            # Fallback: named placeholder patterns
+            freeform = page.locator(
+                "input[placeholder*='provider' i], "
+                "input[placeholder*='vendor' i], "
+                "input[placeholder*='name' i]"
+            ).last
+            if await freeform.count():
+                await freeform.clear()
+                await freeform.fill(vendor or "")
     else:
         choice = _best_match_claude(vendor or "", options)
         await _bs_select(page, vendor_btn, choice)
