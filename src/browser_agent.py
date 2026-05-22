@@ -156,9 +156,19 @@ async def _handle_vendor_btn(page: Page, vendor: str | None, vendor_btn):
         await _bs_select(page, vendor_btn, substring_match)
     elif not_listed:
         await _bs_select(page, vendor_btn, not_listed)
-        await page.wait_for_timeout(600)
-        freeform = page.locator("input[placeholder*='provider' i], input[placeholder*='vendor' i], input[placeholder*='name' i]").last
+        await page.wait_for_timeout(800)
+        # Try common placeholder patterns first, then fall back to any visible text input
+        freeform = page.locator(
+            "input[placeholder*='provider' i], "
+            "input[placeholder*='vendor' i], "
+            "input[placeholder*='name' i], "
+            "input[placeholder*='enter' i], "
+            "input[placeholder*='type' i]"
+        ).last
+        if not await freeform.count():
+            freeform = page.locator("input[type='text']").last
         if await freeform.count():
+            await freeform.clear()
             await freeform.fill(vendor or "")
     else:
         choice = _best_match_claude(vendor or "", options)

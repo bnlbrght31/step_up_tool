@@ -18,7 +18,7 @@ Extract EVERY line item from this receipt exactly as it appears — do not filte
 - description: a short, plain-English description of the item
 - quantity: numeric quantity purchased
 - cost: unit cost as a number (no $ sign)
-- tax: tax amount for this item as a number (no $ sign, 0 if none)
+- tax: tax amount for this item as a number (no $ sign, 0 if none). If the receipt only shows a total tax (not per-item), distribute it proportionally across items based on each item's cost relative to the subtotal. Round to 2 decimal places.
 - vendor: store or company name
 
 Return ONLY a valid JSON array with no markdown fences, no explanation, no other text. Example:
