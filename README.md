@@ -6,7 +6,7 @@ This tool reads a receipt PDF and automatically fills out your Step Up for Stude
 
 ## What you'll need
 
-- A Mac
+- A Mac or Windows PC
 - Google Chrome
 - An Anthropic API key (one-time, see below)
 - Python 3.11 or newer
@@ -33,9 +33,13 @@ ANTHROPIC_API_KEY=sk-ant-your-key-here
 
 Replace `sk-ant-your-key-here` with your actual key.
 
-> **How to create the file:** Open TextEdit, go to **Format → Make Plain Text**, paste the line above, then save it as `.env` in the project folder. Make sure it doesn't save as `.env.txt`.
+> **Mac:** Open TextEdit, go to **Format → Make Plain Text**, paste the line above, then save it as `.env` in the project folder. Make sure it doesn't save as `.env.txt`.
+>
+> **Windows:** Open Notepad, paste the line above, then go to **File → Save As**. Set "Save as type" to **All Files**, name it `.env`, and save it in the project folder.
 
 ### 3. Install dependencies
+
+#### Mac
 
 Open **Terminal**, navigate to the project folder, and run these commands one at a time:
 
@@ -46,17 +50,40 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
+#### Windows
+
+Open **Command Prompt**, navigate to the project folder, and run these commands one at a time:
+
+```
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+playwright install chromium
+```
+
 ### 4. Set up your SUFS Chrome window (one-time)
 
 The agent needs Chrome to run with remote debugging enabled. This requires a separate Chrome profile — but you can sync all your bookmarks and passwords to it by signing into your Google account.
 
-Run this command in Terminal to launch that Chrome:
+#### Mac
+
+Run this command in Terminal:
 
 ```bash
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.sufs-agent-chrome"
 ```
 
-When it opens:
+#### Windows
+
+Run this command in Command Prompt:
+
+```
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\.sufs-agent-chrome"
+```
+
+> If Chrome is installed in a different location, adjust the path accordingly.
+
+When Chrome opens:
 1. Sign into your Google account
 2. Turn on sync (click your profile photo → **Turn on sync** → **Yes, I'm in**)
 3. Sign into the [Step Up for Students portal](https://apply.stepupforstudents.org)
@@ -65,7 +92,9 @@ When it opens:
 
 ### 5. (Optional) Create a shortcut to launch SUFS Chrome
 
-Add this line to your `~/.zshrc` file so you can open the SUFS Chrome with a simple command:
+#### Mac
+
+Add this line to your `~/.zshrc` file:
 
 ```bash
 alias sufs-chrome='/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.sufs-agent-chrome"'
@@ -73,19 +102,26 @@ alias sufs-chrome='/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrom
 
 Then run `source ~/.zshrc`. From now on, just type `sufs-chrome` in Terminal.
 
+#### Windows
+
+Create a file called `sufs-chrome.bat` anywhere convenient (e.g. your Desktop) with this content:
+
+```
+@echo off
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\.sufs-agent-chrome"
+```
+
+Double-click it to launch SUFS Chrome.
+
 ---
 
 ## Every-time usage
 
 ### Step 1 — Launch SUFS Chrome
 
-Open Terminal and run:
+**Mac:** Run `sufs-chrome` in Terminal (or paste the full command from Step 4).
 
-```bash
-sufs-chrome
-```
-
-(Or paste the full command from Step 4 above if you skipped the shortcut.)
+**Windows:** Double-click `sufs-chrome.bat` (or paste the full command from Step 4 into Command Prompt).
 
 ### Step 2 — Open your reimbursement request
 
@@ -96,14 +132,21 @@ In the SUFS Chrome window:
 
 ### Step 3 — Start the app
 
-Open a **second Terminal window**, go to the project folder, and run:
+Open a **second** Terminal (Mac) or Command Prompt (Windows) window, navigate to the project folder, and run:
 
+**Mac:**
 ```bash
 source .venv/bin/activate
 python main.py
 ```
 
-You should see something like `Running on http://127.0.0.1:5050`. Leave this Terminal window open.
+**Windows:**
+```
+.venv\Scripts\activate
+python main.py
+```
+
+You should see something like `Running on http://127.0.0.1:5050`. Leave this window open.
 
 ### Step 4 — Open the app in your browser
 
@@ -149,5 +192,11 @@ Make sure the reimbursement form is open as a tab in the SUFS Chrome window befo
 **Items aren't filling correctly**
 Run **Discover** again with the form open, then retry. This re-maps the dropdown options and usually fixes it.
 
-**The app won't start**
+**The app won't start (Mac)**
 Make sure you activated the virtual environment first: `source .venv/bin/activate`
+
+**The app won't start (Windows)**
+Make sure you activated the virtual environment first: `.venv\Scripts\activate`
+
+**"python" not found (Mac)**
+Try `python3` instead of `python`.
