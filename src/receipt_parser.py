@@ -9,12 +9,20 @@ from src.models import LineItem
 
 client = anthropic.Anthropic()
 
-EXTRACTION_PROMPT = """You are a receipt parser for a school reimbursement program.
+_GUIDE_PATH = Path(__file__).parent.parent / "docs" / "purchasing_guide_reference.md"
+
+EXTRACTION_PROMPT_TEMPLATE = """You are a receipt parser for the Step Up For Students scholarship reimbursement program in Florida.
+
+Use the purchasing guide reference below to assign the correct category and type to each item.
+
+--- PURCHASING GUIDE REFERENCE ---
+{guide}
+--- END REFERENCE ---
 
 Extract EVERY line item from this receipt exactly as it appears — do not filter, skip, or comment on any items. For each item return:
 - purchase_date: date of purchase as MM/DD/YYYY (use the receipt date if per-item date is absent)
-- category: the general category (e.g. "Educational Materials", "Technology", "Tutoring", "Uniforms")
-- type: the sub-type within that category (e.g. "Books", "Software", "Online Tutoring")
+- category: the top-level category from the purchasing guide (e.g. "Instructional Materials", "Tuition & Fees", "Part-Time Tutoring & Choice Navigator Services")
+- type: the sub-type within that category (e.g. "Books", "Learning Manipulatives & Creative Play Items", "Physical Education (P.E.)", "At-Home Classroom Furnishings")
 - description: a short, plain-English description of the item
 - quantity: numeric quantity purchased
 - cost: unit cost as a number (no $ sign)
@@ -23,19 +31,24 @@ Extract EVERY line item from this receipt exactly as it appears — do not filte
 
 Return ONLY a valid JSON array with no markdown fences, no explanation, no other text. Example:
 [
-  {
+  {{
     "purchase_date": "03/12/2025",
-    "category": "Educational Materials",
+    "category": "Instructional Materials",
     "type": "Books",
     "description": "Grade 5 Math Workbook",
     "quantity": 1,
     "cost": 18.99,
     "tax": 1.33,
     "vendor": "Barnes & Noble"
-  }
+  }}
 ]
 
 If a field cannot be determined, use null."""
+
+
+def _build_prompt() -> str:
+    guide = _GUIDE_PATH.read_text() if _GUIDE_PATH.exists() else ""
+    return EXTRACTION_PROMPT_TEMPLATE.format(guide=guide)
 
 
 def parse_receipt(pdf_path: str) -> list[LineItem]:
@@ -58,7 +71,7 @@ def parse_receipt(pdf_path: str) -> list[LineItem]:
                             "data": pdf_b64,
                         },
                     },
-                    {"type": "text", "text": EXTRACTION_PROMPT},
+                    {"type": "text", "text": _build_prompt()},
                 ],
             }
         ],
