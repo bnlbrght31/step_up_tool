@@ -120,8 +120,6 @@
           return;
         }
         allOrders = data.orders;
-        document.getElementById('scan-range-badge').textContent =
-          `Scan range: ${data.after_date} → today`;
         renderTable(allOrders);
       } catch (e) {
         setStatus('err', 'Network error: ' + e.message);
