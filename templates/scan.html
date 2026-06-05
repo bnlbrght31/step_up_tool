@@ -141,10 +141,12 @@
 
       const newCount = orders.filter(o => !o.in_sheet).length;
       const eligibleCount = orders.filter(o => o.eligible_category && !o.in_sheet).length;
+      const costStr = data.scan_cost !== undefined ? ` — API cost: $${data.scan_cost.toFixed(4)}` : '';
       document.getElementById('summary-text').innerHTML =
         `Found <strong>${orders.length}</strong> orders — ` +
         `<strong>${newCount}</strong> not yet in sheet, ` +
-        `<strong>${eligibleCount}</strong> likely eligible.`;
+        `<strong>${eligibleCount}</strong> likely eligible` +
+        `<span style="color:#a0aec0;font-weight:400">${costStr}</span>.`;
 
       orders.forEach((o, i) => {
         const tr = document.createElement('tr');

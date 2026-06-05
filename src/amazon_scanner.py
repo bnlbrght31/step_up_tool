@@ -179,11 +179,12 @@ No explanation, no markdown."""
             print(f"[scanner] Claude chunk {i//CHUNK_SIZE + 1} failed ({e}), using keywords for this chunk")
             all_results.extend([check_eligibility(d) for d in chunk])
 
+    eligibility_cost = 0.0
     if total_in or total_out:
-        cost = (total_in * 0.80 + total_out * 4.00) / 1_000_000
-        print(f"[eligibility check] API cost: ${cost:.4f}  ({total_in:,} in / {total_out:,} out)")
+        eligibility_cost = (total_in * 0.80 + total_out * 4.00) / 1_000_000
+        print(f"[eligibility check] API cost: ${eligibility_cost:.4f}  ({total_in:,} in / {total_out:,} out)")
 
-    return all_results
+    return all_results, eligibility_cost
 
 
 # ---------------------------------------------------------------------------
@@ -375,8 +376,8 @@ def scan_amazon_orders(existing_order_numbers: set, from_date: str | None = None
 
     # Batch eligibility check via Claude Haiku (one API call for all orders)
     descriptions = [o["description"] for o in orders]
-    categories = batch_check_eligibility(descriptions)
+    categories, eligibility_cost = batch_check_eligibility(descriptions)
     for order, category in zip(orders, categories):
         order["eligible_category"] = category
 
-    return orders, after_date
+    return orders, after_date, eligibility_cost

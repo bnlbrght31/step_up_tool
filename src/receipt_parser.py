@@ -88,6 +88,8 @@ def parse_receipt(pdf_path: str) -> list[LineItem]:
         ],
     )
 
+    input_tokens, output_tokens = message.usage.input_tokens, message.usage.output_tokens
+    parse_cost = (input_tokens * 3.00 + output_tokens * 15.00) / 1_000_000
     _print_cost("claude-sonnet-4-6", message.usage, "receipt parser")
     raw = message.content[0].text.strip()
 
@@ -106,4 +108,4 @@ def parse_receipt(pdf_path: str) -> list[LineItem]:
         raw = match.group(0)
 
     items_data: list[dict] = json.loads(raw)
-    return [LineItem.from_dict(item) for item in items_data]
+    return [LineItem.from_dict(item) for item in items_data], parse_cost

@@ -44,6 +44,9 @@
 <div class="page-header">
   <h1>Review Extracted Items</h1>
   <p class="sub">Edit any fields, uncheck items to skip, then click <strong>Fill Form</strong>. The agent will never submit.</p>
+  {% if parse_cost %}
+  <p style="margin-top:6px;font-size:.8rem;color:#a0aec0;">API cost for this parse: {{ parse_cost }}</p>
+  {% endif %}
 </div>
 
 <div class="warning-banner">

@@ -44,11 +44,12 @@ def upload():
     file.save(filepath)
 
     try:
-        items = parse_receipt(str(filepath))
+        items, parse_cost = parse_receipt(str(filepath))
     except Exception as e:
         return render_template("index.html", error=f"Failed to parse receipt: {e}", options_discovered=load_form_options() is not None)
 
     session["items"] = [item.to_dict() for item in items]
+    session["parse_cost"] = parse_cost
     return redirect(url_for("confirm"))
 
 
@@ -58,10 +59,12 @@ def confirm():
     if not items:
         return redirect(url_for("index"))
     form_options = load_form_options()
+    parse_cost = session.get("parse_cost")
     return render_template(
         "confirm.html",
         items=items,
         form_options_json=json.dumps(form_options) if form_options else "null",
+        parse_cost=f"${parse_cost:.4f}" if parse_cost else None,
         enumerate=enumerate,
     )
 
@@ -124,8 +127,8 @@ def scan_run():
     from_date = data.get("from_date")  # YYYY-MM-DD from date picker, or None
     try:
         existing = get_existing_order_numbers()
-        orders, after_date = scan_amazon_orders(existing, from_date=from_date)
-        return jsonify({"orders": orders, "after_date": after_date})
+        orders, after_date, scan_cost = scan_amazon_orders(existing, from_date=from_date)
+        return jsonify({"orders": orders, "after_date": after_date, "scan_cost": round(scan_cost, 4)})
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
