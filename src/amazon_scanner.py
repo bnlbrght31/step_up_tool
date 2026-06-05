@@ -187,6 +187,65 @@ No explanation, no markdown."""
 
 
 # ---------------------------------------------------------------------------
+# Return email scanning
+# ---------------------------------------------------------------------------
+
+_RETURN_SUBJECT_PREFIXES = [
+    "Return request confirmed for ",
+    "Your return drop off confirmation for ",
+    "Your refund for ",
+    "Advance refund issued for ",
+    "Partial refund confirmed for ",
+]
+
+def _parse_return_subject(subject: str) -> str | None:
+    """Extract the returned item name from an Amazon return email subject."""
+    for prefix in _RETURN_SUBJECT_PREFIXES:
+        if subject.lower().startswith(prefix.lower()):
+            return subject[len(prefix):].rstrip(". ")
+    return None
+
+
+def scan_return_emails(after_date: str) -> dict:
+    """
+    Scan Gmail for Amazon return/refund emails since after_date.
+    Returns {order_number: {"items": [str], "partial": bool}}
+    """
+    service = _get_gmail_service()
+    queries = [
+        f"from:return@amazon.com after:{after_date}",
+        f"from:payments-messages@amazon.com after:{after_date} subject:refund",
+    ]
+    returns: dict = {}
+
+    for query in queries:
+        results = service.users().messages().list(userId="me", q=query, maxResults=500).execute()
+        for ref in results.get("messages", []):
+            try:
+                msg = service.users().messages().get(
+                    userId="me", id=ref["id"], format="full"
+                ).execute()
+                subject = _get_header(msg, "Subject")
+                body = _decode_body(msg)
+                order_numbers = ORDER_RE.findall(f"{subject}\n{body}")
+                if not order_numbers:
+                    continue
+                order_number = order_numbers[0]
+                is_partial = "partial refund" in subject.lower()
+                item_name = _parse_return_subject(subject)
+                if order_number not in returns:
+                    returns[order_number] = {"items": set(), "partial": is_partial}
+                if item_name:
+                    returns[order_number]["items"].add(item_name)
+                if is_partial:
+                    returns[order_number]["partial"] = True
+            except Exception as e:
+                print(f"[scanner] Error processing return email: {e}")
+
+    return {on: {"items": list(d["items"]), "partial": d["partial"]} for on, d in returns.items()}
+
+
+# ---------------------------------------------------------------------------
 # Scan state (last scan date persistence)
 # ---------------------------------------------------------------------------
 
@@ -378,5 +437,20 @@ def scan_amazon_orders(existing_order_numbers: set, from_date: str | None = None
     categories, eligibility_cost = batch_check_eligibility(descriptions)
     for order, category in zip(orders, categories):
         order["eligible_category"] = category
+
+    # Annotate orders with return/refund info
+    print("[scanner] Scanning for return emails…")
+    return_data = scan_return_emails(after_date)
+    print(f"[scanner] Found {len(return_data)} order(s) with returns")
+    for order in orders:
+        on = order["order_number"]
+        if on in return_data:
+            order["has_return"] = True
+            order["returned_items"] = return_data[on]["items"]
+            order["partial_return"] = return_data[on]["partial"]
+        else:
+            order["has_return"] = False
+            order["returned_items"] = []
+            order["partial_return"] = False
 
     return orders, after_date, eligibility_cost

@@ -40,6 +40,8 @@
     .tag-eligible { background: #c6f6d5; color: #276749; }
     .tag-unknown { background: #e2e8f0; color: #718096; }
     .tag-sheet { background: #e9d8fd; color: #553c9a; }
+    .tag-returned { background: #fed7d7; color: #c53030; cursor: help; }
+    .tag-partial { background: #fefcbf; color: #744210; cursor: help; }
     .empty-state { text-align: center; padding: 48px 24px; color: #a0aec0; }
     .empty-state p { margin-top: 8px; font-size: .9rem; }
     a.back { display: inline-block; margin-bottom: 20px; color: #3182ce; font-size: .88rem; text-decoration: none; }
@@ -166,6 +168,17 @@
         const sheetTag = o.in_sheet
           ? `<span class="tag tag-sheet">In sheet</span>`
           : '';
+        let returnTag = '';
+        if (o.has_return) {
+          const tip = o.returned_items && o.returned_items.length
+            ? o.returned_items.join(' / ')
+            : 'Return on file';
+          if (o.partial_return) {
+            returnTag = `<span class="tag tag-partial" title="${tip}">Partial return ⚠</span>`;
+          } else {
+            returnTag = `<span class="tag tag-returned" title="${tip}">Returned ✕</span>`;
+          }
+        }
 
         tr.innerHTML = `
           <td class="check-col">
@@ -175,7 +188,7 @@
           </td>
           <td>${o.purchase_date || '—'}</td>
           <td style="font-family:monospace;font-size:.8rem">${o.order_number}</td>
-          <td>${o.description} ${sheetTag}</td>
+          <td>${o.description} ${sheetTag} ${returnTag}</td>
           <td>$${o.total || '—'}</td>
           <td>${categoryTag}</td>
         `;
