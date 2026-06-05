@@ -9,6 +9,17 @@ from src.models import LineItem
 
 client = anthropic.Anthropic()
 
+PRICING = {
+    "claude-sonnet-4-6":       (3.00, 15.00),
+    "claude-haiku-4-5-20251001": (0.80,  4.00),
+}
+
+def _print_cost(model: str, usage, label: str = ""):
+    input_price, output_price = PRICING.get(model, (3.00, 15.00))
+    cost = (usage.input_tokens * input_price + usage.output_tokens * output_price) / 1_000_000
+    tag = f"[{label}] " if label else ""
+    print(f"{tag}API cost: ${cost:.4f}  ({usage.input_tokens:,} in / {usage.output_tokens:,} out)")
+
 _GUIDE_PATH = Path(__file__).parent.parent / "docs" / "purchasing_guide_reference.md"
 
 EXTRACTION_PROMPT_TEMPLATE = """You are a receipt parser for the Step Up For Students scholarship reimbursement program in Florida.
@@ -77,6 +88,7 @@ def parse_receipt(pdf_path: str) -> list[LineItem]:
         ],
     )
 
+    _print_cost("claude-sonnet-4-6", message.usage, "receipt parser")
     raw = message.content[0].text.strip()
 
     # Strip markdown fences if present

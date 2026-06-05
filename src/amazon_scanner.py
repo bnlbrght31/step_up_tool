@@ -126,8 +126,10 @@ def batch_check_eligibility(descriptions: list) -> list:
     guide_path = Path(__file__).parent.parent / "docs" / "purchasing_guide_reference.md"
     guide = guide_path.read_text() if guide_path.exists() else ""
     client = anthropic.Anthropic()
+    total_in = total_out = 0
 
     def _call_claude(chunk: list) -> list:
+        nonlocal total_in, total_out
         numbered = "\n".join(f"{i+1}. {d}" for i, d in enumerate(chunk))
         prompt = f"""You are checking whether Amazon purchase descriptions are eligible for the Step Up For Students (SUFS) scholarship reimbursement program in Florida.
 
@@ -161,6 +163,8 @@ No explanation, no markdown."""
         result = _json.loads(raw)
         if len(result) != len(chunk):
             raise ValueError(f"Expected {len(chunk)} results, got {len(result)}")
+        total_in += msg.usage.input_tokens
+        total_out += msg.usage.output_tokens
         return result
 
     # Process in chunks of 50 to keep responses well within token limits
@@ -174,6 +178,11 @@ No explanation, no markdown."""
         except Exception as e:
             print(f"[scanner] Claude chunk {i//CHUNK_SIZE + 1} failed ({e}), using keywords for this chunk")
             all_results.extend([check_eligibility(d) for d in chunk])
+
+    if total_in or total_out:
+        cost = (total_in * 0.80 + total_out * 4.00) / 1_000_000
+        print(f"[eligibility check] API cost: ${cost:.4f}  ({total_in:,} in / {total_out:,} out)")
+
     return all_results
 
 
