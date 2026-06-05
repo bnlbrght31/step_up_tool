@@ -36,11 +36,17 @@ async def _download_one(order_id: str, cdp_port: int = 9222) -> str:
 def download_invoices(order_ids: list, cdp_port: int = 9222) -> dict:
     """
     Download PDFs for a list of order IDs.
-    Returns {order_id: file_path_or_error_string}.
+    Skips files that already exist on disk.
+    Returns {order_id: file_path | "SKIPPED: already exists" | "ERROR: ..."}.
     Requires the SUFS Chrome window to be open (same CDP connection used for form filling).
     """
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     results = {}
     for oid in order_ids:
+        existing = OUTPUT_DIR / f"{oid}.pdf"
+        if existing.exists():
+            results[oid] = f"SKIPPED: {existing}"
+            continue
         try:
             path = asyncio.run(_download_one(oid, cdp_port))
             results[oid] = path

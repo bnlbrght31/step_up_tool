@@ -62,8 +62,8 @@
 
     <div class="action-row">
       <button class="btn btn-primary" id="scan-btn" onclick="runScan()">Scan Gmail</button>
-      <button class="btn btn-success" id="log-btn" onclick="logSelected()" disabled>Log Selected to Sheet</button>
-      <button class="btn btn-outline" id="pdf-btn" onclick="downloadPDFs()" disabled>Download PDFs (needs SUFS Chrome)</button>
+      <button class="btn btn-success" id="log-pdf-btn" onclick="logAndDownload()" disabled>Log to Sheet + Download PDFs</button>
+      <button class="btn btn-outline" id="log-btn" onclick="logSelected()" disabled>Log to Sheet Only</button>
     </div>
 
     <div id="results-section">
@@ -166,8 +166,8 @@
       });
 
       document.getElementById('results-section').style.display = 'block';
+      document.getElementById('log-pdf-btn').disabled = false;
       document.getElementById('log-btn').disabled = false;
-      document.getElementById('pdf-btn').disabled = false;
       setStatus('ok', `Scan complete — ${orders.length} order(s) found.`);
     }
 
@@ -191,73 +191,95 @@
       document.getElementById('select-eligible').checked = false;
     }
 
-    async function logSelected() {
-      const selected = getSelectedOrders();
-      if (!selected.length) {
-        setStatus('err', 'No orders selected.');
-        return;
-      }
-      const btn = document.getElementById('log-btn');
-      btn.disabled = true;
-      btn.textContent = 'Logging…';
-      setStatus('info', `Logging ${selected.length} order(s) to Google Sheet…`);
+    async function _doLog(selected) {
+      const res = await fetch('/scan/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orders: selected }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Log failed');
+      selected.forEach(o => { o.in_sheet = true; });
+      return data.logged;
+    }
 
-      try {
-        const res = await fetch('/scan/log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orders: selected }),
-        });
-        const data = await res.json();
-        if (data.success) {
-          setStatus('ok', `✓ Logged ${data.logged} order(s) to the sheet. Last scan date updated.`);
-          // Mark logged orders as in-sheet
-          selected.forEach(o => { o.in_sheet = true; });
-          renderTable(allOrders);
-        } else {
-          setStatus('err', 'Error: ' + data.error);
-        }
-      } catch (e) {
-        setStatus('err', 'Network error: ' + e.message);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Log Selected to Sheet';
+    async function _doPDFs(selected) {
+      const res = await fetch('/scan/pdfs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_ids: selected.map(o => o.order_number) }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const entries = Object.entries(data.results || {});
+      const errors   = entries.filter(([, v]) => String(v).startsWith('ERROR'));
+      const skipped  = entries.filter(([, v]) => String(v).startsWith('SKIPPED'));
+      const saved    = entries.filter(([, v]) => !String(v).startsWith('ERROR') && !String(v).startsWith('SKIPPED'));
+      return { errors, skipped, saved };
+    }
+
+    function _showPDFSummary(loggedCount, pdfResult) {
+      const { errors, skipped, saved } = pdfResult;
+      let msg = `✓ Logged ${loggedCount} order(s) to sheet. `;
+      msg += `PDFs: ${saved.length} downloaded, ${skipped.length} skipped (already existed), ${errors.length} error(s).`;
+      const type = errors.length ? 'err' : 'ok';
+      setStatus(type, msg);
+
+      // Show skipped list if any
+      const existingNote = document.getElementById('pdf-skip-note');
+      if (existingNote) existingNote.remove();
+      if (skipped.length) {
+        const note = document.createElement('div');
+        note.id = 'pdf-skip-note';
+        note.style.cssText = 'margin-top:10px;font-size:.82rem;color:#718096;';
+        note.innerHTML = '<strong>Skipped (PDF already exists):</strong><br>' +
+          skipped.map(([id]) => `&nbsp;&nbsp;${id}.pdf`).join('<br>');
+        document.getElementById('status-bar').after(note);
+      }
+      if (errors.length) {
+        console.warn('PDF errors:', errors);
       }
     }
 
-    async function downloadPDFs() {
+    async function logAndDownload() {
       const selected = getSelectedOrders();
-      if (!selected.length) {
-        setStatus('err', 'No orders selected.');
-        return;
-      }
-      const btn = document.getElementById('pdf-btn');
+      if (!selected.length) { setStatus('err', 'No orders selected.'); return; }
+      const btn = document.getElementById('log-pdf-btn');
       btn.disabled = true;
-      btn.textContent = 'Downloading…';
-      setStatus('info', `Downloading ${selected.length} PDF(s) via SUFS Chrome…`);
-
+      document.getElementById('log-btn').disabled = true;
       try {
-        const res = await fetch('/scan/pdfs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ order_ids: selected.map(o => o.order_number) }),
-        });
-        const data = await res.json();
-        if (data.results) {
-          const errors = Object.entries(data.results).filter(([, v]) => v.startsWith('ERROR'));
-          if (errors.length) {
-            setStatus('err', `Downloaded with ${errors.length} error(s). Check SUFS Chrome is open and logged into Amazon.`);
-          } else {
-            setStatus('ok', `✓ ${selected.length} PDF(s) saved to ~/Desktop/SUFS/2025-2026/`);
-          }
-        } else {
-          setStatus('err', 'Error: ' + (data.error || 'Unknown'));
-        }
+        setStatus('info', `Logging ${selected.length} order(s) to sheet…`);
+        const logged = await _doLog(selected);
+        setStatus('info', `✓ Logged ${logged}. Downloading PDFs via SUFS Chrome…`);
+        const pdfResult = await _doPDFs(selected);
+        _showPDFSummary(logged, pdfResult);
+        renderTable(allOrders);
       } catch (e) {
-        setStatus('err', 'Network error: ' + e.message);
+        setStatus('err', 'Error: ' + e.message);
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Download PDFs (needs SUFS Chrome)';
+        document.getElementById('log-btn').disabled = false;
+      }
+    }
+
+    async function logSelected() {
+      const selected = getSelectedOrders();
+      if (!selected.length) { setStatus('err', 'No orders selected.'); return; }
+      const btn = document.getElementById('log-btn');
+      btn.disabled = true;
+      document.getElementById('log-pdf-btn').disabled = true;
+      btn.textContent = 'Logging…';
+      try {
+        setStatus('info', `Logging ${selected.length} order(s) to sheet…`);
+        const logged = await _doLog(selected);
+        setStatus('ok', `✓ Logged ${logged} order(s) to the sheet. Scan date updated.`);
+        renderTable(allOrders);
+      } catch (e) {
+        setStatus('err', 'Error: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        document.getElementById('log-pdf-btn').disabled = false;
+        btn.textContent = 'Log to Sheet Only';
       }
     }
 
