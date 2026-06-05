@@ -159,7 +159,8 @@
       orders.forEach((o, i) => {
         const tr = document.createElement('tr');
         tr.dataset.eligible = o.eligible_category ? 'true' : 'false';
-        if (showEligibleOnly && !o.eligible_category) tr.style.display = 'none';
+        tr.dataset.insheet = o.in_sheet ? 'true' : 'false';
+        if (showEligibleOnly && (!o.eligible_category || o.in_sheet)) tr.style.display = 'none';
         if (o.in_sheet) tr.classList.add('in-sheet');
 
         const categoryTag = o.eligible_category
@@ -233,7 +234,7 @@
       btn.style.background = showEligibleOnly ? '#3182ce' : '';
       btn.style.color = showEligibleOnly ? '#fff' : '';
       document.querySelectorAll('#orders-table tr').forEach(tr => {
-        tr.style.display = (showEligibleOnly && tr.dataset.eligible === 'false') ? 'none' : '';
+        tr.style.display = (showEligibleOnly && (tr.dataset.eligible === 'false' || tr.dataset.insheet === 'true')) ? 'none' : '';
       });
     }
 
