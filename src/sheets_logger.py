@@ -8,7 +8,7 @@ Column order: Student | Item | Store | Order number | Price | Date Purchased | S
 
 import os
 
-SHEET_ID = "1RgX0mHVHt86EuXka43bgK2gXnl4DqW6FbssCWe5Q6xk"
+SHEET_ID = os.environ.get("SUFS_SHEET_ID", "")
 TAB = "2025-2026"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 

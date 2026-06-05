@@ -1,6 +1,9 @@
 # SUFS Reimbursement Agent
 
-This tool reads a receipt PDF and automatically fills out your Step Up for Students reimbursement form in Chrome. You review everything — it never submits.
+Two tools in one:
+
+1. **Receipt parser** — reads a receipt PDF and automatically fills out your Step Up for Students reimbursement form in Chrome. You review everything — it never submits.
+2. **Amazon order scanner** — scans your Gmail for Amazon order confirmation emails, flags SUFS-eligible purchases, marks returned items, and logs orders to your tracking spreadsheet with one click.
 
 ---
 
@@ -29,9 +32,10 @@ In the project folder, create a file called `.env` (no other name, just `.env`) 
 
 ```
 ANTHROPIC_API_KEY=sk-ant-your-key-here
+SUFS_SHEET_ID=your-google-sheet-id-here
 ```
 
-Replace `sk-ant-your-key-here` with your actual key.
+Replace each value with your actual key / sheet ID. The sheet ID is the long string in your Google Sheet URL between `/d/` and `/edit`.
 
 > **Mac:** Open TextEdit, go to **Format → Make Plain Text**, paste the line above, then save it as `.env` in the project folder. Make sure it doesn't save as `.env.txt`.
 >
@@ -178,6 +182,50 @@ Click **Fill Form**. Switch to your SUFS Chrome window and watch it fill in the 
 1. **Review everything carefully** in Chrome
 2. Make any corrections by hand
 3. **Submit the form yourself** — the agent never submits
+
+---
+
+## Amazon Order Scanner
+
+The scanner lives at [http://127.0.0.1:5050/scan](http://127.0.0.1:5050/scan) once the app is running. It requires two one-time setup steps.
+
+### One-time setup for the scanner
+
+#### A. Gmail authorization
+
+The scanner reads your Gmail using OAuth. Run this once to authorize it:
+
+```bash
+python authorize_gmail.py
+```
+
+A browser window will open asking you to sign in and grant Gmail read-only access. Your token is saved to `token.json` (gitignored — never committed).
+
+#### B. Google Sheets service account
+
+The scanner logs orders to your tracking spreadsheet using a Google service account. You need:
+
+1. A Google Cloud service account JSON file saved as `service_account.json` in the project folder (gitignored)
+2. The service account email shared as an **Editor** on your tracking spreadsheet
+3. Your sheet ID in `.env` as `SUFS_SHEET_ID=...`
+
+### Using the scanner
+
+1. Start the app (`python main.py`) and go to [http://127.0.0.1:5050/scan](http://127.0.0.1:5050/scan)
+2. The **Scan from** date defaults to your last scan date (or July 1 of the current scholarship year on first run). Change it if you want to go further back.
+3. Click **Scan Gmail** — this searches for Amazon order confirmation emails and checks each item for SUFS eligibility using Claude. Takes 30–60 seconds depending on how many emails are found.
+4. Review the results table:
+   - **Green** badge = flagged as SUFS-eligible
+   - **Purple** badge = already in your tracking sheet
+   - **Red** badge = item was returned
+   - **Yellow** badge = partial return (hover to see which item)
+   - Use **Show Eligible Only** to hide ineligible and already-logged rows
+5. Check the boxes for items you want to log, then click:
+   - **Log to Sheet + Download PDFs** — appends to your Google Sheet and downloads invoice PDFs to `~/Desktop/SUFS/2025-2026/` via the SUFS Chrome window. Existing PDFs are skipped.
+   - **Log to Sheet Only** — appends to the sheet without downloading PDFs (use when Chrome isn't open)
+6. The scan date updates automatically after logging so the next scan picks up from today.
+
+> The scanner never submits anything to SUFS — it only reads Gmail and writes to your own spreadsheet.
 
 ---
 
