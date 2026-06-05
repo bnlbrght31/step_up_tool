@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Amazon Order Scanner — SUFS</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f9; min-height: 100vh; padding: 32px 16px; }
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.1); padding: 32px; max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 1.4rem; color: #1a202c; margin-bottom: 4px; }
+    p.sub { color: #718096; font-size: .9rem; margin-bottom: 24px; }
+    .info-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
+    .info-row .badge { padding: 4px 12px; border-radius: 20px; font-size: .8rem; font-weight: 600; background: #ebf8ff; color: #2b6cb0; }
+    .btn { padding: 9px 18px; border: none; border-radius: 8px; font-size: .88rem; font-weight: 600; cursor: pointer; transition: background .15s; }
+    .btn-primary { background: #3182ce; color: #fff; }
+    .btn-primary:hover { background: #2b6cb0; }
+    .btn-primary:disabled { background: #a0aec0; cursor: not-allowed; }
+    .btn-success { background: #38a169; color: #fff; }
+    .btn-success:hover { background: #2f855a; }
+    .btn-success:disabled { background: #a0aec0; cursor: not-allowed; }
+    .btn-outline { background: #fff; border: 1px solid #cbd5e0; color: #4a5568; }
+    .btn-outline:hover { background: #f7fafc; }
+    .btn-sm { padding: 5px 12px; font-size: .8rem; }
+    .status-bar { padding: 10px 14px; border-radius: 8px; font-size: .88rem; margin-bottom: 16px; display: none; }
+    .status-bar.info { background: #ebf8ff; color: #2b6cb0; display: block; }
+    .status-bar.ok { background: #c6f6d5; color: #276749; display: block; }
+    .status-bar.err { background: #fed7d7; color: #c53030; display: block; }
+    .action-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
+    .select-all-row { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; font-size: .85rem; color: #4a5568; }
+    table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+    thead th { background: #edf2f7; padding: 10px 12px; text-align: left; font-weight: 600; color: #4a5568; border-bottom: 2px solid #e2e8f0; }
+    tbody tr { border-bottom: 1px solid #e2e8f0; }
+    tbody tr:hover { background: #f7fafc; }
+    tbody tr.in-sheet { opacity: .5; }
+    td { padding: 9px 12px; vertical-align: middle; }
+    td.check-col { width: 36px; text-align: center; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: .75rem; font-weight: 600; }
+    .tag-eligible { background: #c6f6d5; color: #276749; }
+    .tag-unknown { background: #e2e8f0; color: #718096; }
+    .tag-sheet { background: #e9d8fd; color: #553c9a; }
+    .empty-state { text-align: center; padding: 48px 24px; color: #a0aec0; }
+    .empty-state p { margin-top: 8px; font-size: .9rem; }
+    a.back { display: inline-block; margin-bottom: 20px; color: #3182ce; font-size: .88rem; text-decoration: none; }
+    a.back:hover { text-decoration: underline; }
+    #results-section { display: none; }
+    .summary { font-size: .85rem; color: #4a5568; margin-bottom: 8px; }
+    .summary strong { color: #2d3748; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <a class="back" href="/">← Back to Receipt Agent</a>
+    <h1>Amazon Order Scanner</h1>
+    <p class="sub">Scan Gmail for Amazon orders, flag SUFS-eligible items, and log them to your tracking sheet.</p>
+
+    <div class="info-row">
+      <span class="badge" id="scan-range-badge">Scan range: loading…</span>
+    </div>
+
+    <div id="status-bar" class="status-bar"></div>
+
+    <div class="action-row">
+      <button class="btn btn-primary" id="scan-btn" onclick="runScan()">Scan Gmail</button>
+      <button class="btn btn-success" id="log-btn" onclick="logSelected()" disabled>Log Selected to Sheet</button>
+      <button class="btn btn-outline" id="pdf-btn" onclick="downloadPDFs()" disabled>Download PDFs (needs SUFS Chrome)</button>
+    </div>
+
+    <div id="results-section">
+      <div class="summary" id="summary-text"></div>
+      <div class="select-all-row">
+        <label><input type="checkbox" id="select-eligible" onchange="selectEligible(this.checked)" /> Select all eligible (not yet in sheet)</label>
+        <label><input type="checkbox" id="select-all" onchange="selectAll(this.checked)" /> Select all</label>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th class="check-col"></th>
+            <th>Date</th>
+            <th>Order #</th>
+            <th>Description</th>
+            <th>Total</th>
+            <th>SUFS Category</th>
+          </tr>
+        </thead>
+        <tbody id="orders-table"></tbody>
+      </table>
+    </div>
+
+    <div class="empty-state" id="empty-state" style="display:none">
+      <p>No new Amazon orders found since the last scan date.</p>
+    </div>
+  </div>
+
+  <script>
+    let allOrders = [];
+
+    async function runScan() {
+      const btn = document.getElementById('scan-btn');
+      setStatus('info', 'Connecting to Gmail and scanning orders…');
+      btn.disabled = true;
+      btn.textContent = 'Scanning…';
+      document.getElementById('results-section').style.display = 'none';
+      document.getElementById('empty-state').style.display = 'none';
+
+      try {
+        const res = await fetch('/scan/run', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          setStatus('err', 'Error: ' + (data.error || 'Unknown error'));
+          return;
+        }
+        allOrders = data.orders;
+        document.getElementById('scan-range-badge').textContent =
+          `Scan range: ${data.after_date} → today`;
+        renderTable(allOrders);
+      } catch (e) {
+        setStatus('err', 'Network error: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Scan Gmail';
+      }
+    }
+
+    function renderTable(orders) {
+      const tbody = document.getElementById('orders-table');
+      tbody.innerHTML = '';
+
+      if (!orders.length) {
+        document.getElementById('empty-state').style.display = 'block';
+        setStatus('ok', 'Scan complete — no new orders found.');
+        return;
+      }
+
+      const newCount = orders.filter(o => !o.in_sheet).length;
+      const eligibleCount = orders.filter(o => o.eligible_category && !o.in_sheet).length;
+      document.getElementById('summary-text').innerHTML =
+        `Found <strong>${orders.length}</strong> orders — ` +
+        `<strong>${newCount}</strong> not yet in sheet, ` +
+        `<strong>${eligibleCount}</strong> likely eligible.`;
+
+      orders.forEach((o, i) => {
+        const tr = document.createElement('tr');
+        if (o.in_sheet) tr.classList.add('in-sheet');
+
+        const categoryTag = o.eligible_category
+          ? `<span class="tag tag-eligible">${o.eligible_category}</span>`
+          : `<span class="tag tag-unknown">Unknown</span>`;
+        const sheetTag = o.in_sheet
+          ? `<span class="tag tag-sheet">In sheet</span>`
+          : '';
+
+        tr.innerHTML = `
+          <td class="check-col">
+            <input type="checkbox" class="order-check" data-idx="${i}"
+              ${o.eligible_category && !o.in_sheet ? 'checked' : ''}
+              ${o.in_sheet ? 'disabled' : ''} />
+          </td>
+          <td>${o.purchase_date || '—'}</td>
+          <td style="font-family:monospace;font-size:.8rem">${o.order_number}</td>
+          <td>${o.description} ${sheetTag}</td>
+          <td>$${o.total || '—'}</td>
+          <td>${categoryTag}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('results-section').style.display = 'block';
+      document.getElementById('log-btn').disabled = false;
+      document.getElementById('pdf-btn').disabled = false;
+      setStatus('ok', `Scan complete — ${orders.length} order(s) found.`);
+    }
+
+    function getSelectedOrders() {
+      return Array.from(document.querySelectorAll('.order-check:checked:not(:disabled)'))
+        .map(cb => allOrders[parseInt(cb.dataset.idx)]);
+    }
+
+    function selectEligible(checked) {
+      document.querySelectorAll('.order-check:not(:disabled)').forEach(cb => {
+        const o = allOrders[parseInt(cb.dataset.idx)];
+        cb.checked = checked ? !!o.eligible_category : false;
+      });
+      document.getElementById('select-all').checked = false;
+    }
+
+    function selectAll(checked) {
+      document.querySelectorAll('.order-check:not(:disabled)').forEach(cb => {
+        cb.checked = checked;
+      });
+      document.getElementById('select-eligible').checked = false;
+    }
+
+    async function logSelected() {
+      const selected = getSelectedOrders();
+      if (!selected.length) {
+        setStatus('err', 'No orders selected.');
+        return;
+      }
+      const btn = document.getElementById('log-btn');
+      btn.disabled = true;
+      btn.textContent = 'Logging…';
+      setStatus('info', `Logging ${selected.length} order(s) to Google Sheet…`);
+
+      try {
+        const res = await fetch('/scan/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orders: selected }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setStatus('ok', `✓ Logged ${data.logged} order(s) to the sheet. Last scan date updated.`);
+          // Mark logged orders as in-sheet
+          selected.forEach(o => { o.in_sheet = true; });
+          renderTable(allOrders);
+        } else {
+          setStatus('err', 'Error: ' + data.error);
+        }
+      } catch (e) {
+        setStatus('err', 'Network error: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Log Selected to Sheet';
+      }
+    }
+
+    async function downloadPDFs() {
+      const selected = getSelectedOrders();
+      if (!selected.length) {
+        setStatus('err', 'No orders selected.');
+        return;
+      }
+      const btn = document.getElementById('pdf-btn');
+      btn.disabled = true;
+      btn.textContent = 'Downloading…';
+      setStatus('info', `Downloading ${selected.length} PDF(s) via SUFS Chrome…`);
+
+      try {
+        const res = await fetch('/scan/pdfs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_ids: selected.map(o => o.order_number) }),
+        });
+        const data = await res.json();
+        if (data.results) {
+          const errors = Object.entries(data.results).filter(([, v]) => v.startsWith('ERROR'));
+          if (errors.length) {
+            setStatus('err', `Downloaded with ${errors.length} error(s). Check SUFS Chrome is open and logged into Amazon.`);
+          } else {
+            setStatus('ok', `✓ ${selected.length} PDF(s) saved to ~/Desktop/SUFS/2025-2026/`);
+          }
+        } else {
+          setStatus('err', 'Error: ' + (data.error || 'Unknown'));
+        }
+      } catch (e) {
+        setStatus('err', 'Network error: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Download PDFs (needs SUFS Chrome)';
+      }
+    }
+
+    function setStatus(type, msg) {
+      const bar = document.getElementById('status-bar');
+      bar.className = 'status-bar ' + type;
+      bar.textContent = msg;
+    }
+
+    // Show the default scan range on load
+    fetch('/scan/state')
+      .then(r => r.json())
+      .then(d => {
+        document.getElementById('scan-range-badge').textContent =
+          `Scan range: ${d.last_scan_date} → today (scholarship year)`;
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>

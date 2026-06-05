@@ -9,3 +9,7 @@ __pycache__/
 venv/
 .venv/
 form_selectors.json
+service_account.json
+token.json
+gmail_oauth_credentials.json
+scan_state.json

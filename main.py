@@ -9,9 +9,12 @@ from werkzeug.utils import secure_filename
 
 load_dotenv()
 
+from src.amazon_scanner import load_last_scan, save_last_scan, scan_amazon_orders
 from src.browser_agent import discover_form_options, fill_form, inspect_form_elements, load_form_options
 from src.models import LineItem
+from src.pdf_downloader import download_invoices
 from src.receipt_parser import parse_receipt
+from src.sheets_logger import append_orders, get_existing_order_numbers
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-in-prod")
@@ -101,6 +104,56 @@ def fill():
     try:
         asyncio.run(fill_form(form_url=form_url, items=selected, cdp_port=cdp_port))
         return jsonify({"success": True, "filled": len(selected)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/scan")
+def scan():
+    return render_template("scan.html")
+
+
+@app.route("/scan/state")
+def scan_state():
+    return jsonify({"last_scan_date": load_last_scan()})
+
+
+@app.route("/scan/run", methods=["POST"])
+def scan_run():
+    try:
+        existing = get_existing_order_numbers()
+        orders, after_date = scan_amazon_orders(existing)
+        return jsonify({"orders": orders, "after_date": after_date})
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/scan/log", methods=["POST"])
+def scan_log():
+    data = request.get_json() or {}
+    orders = data.get("orders", [])
+    if not orders:
+        return jsonify({"error": "No orders provided."}), 400
+    try:
+        append_orders(orders)
+        save_last_scan()
+        return jsonify({"success": True, "logged": len(orders)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/scan/pdfs", methods=["POST"])
+def scan_pdfs():
+    data = request.get_json() or {}
+    order_ids = data.get("order_ids", [])
+    if not order_ids:
+        return jsonify({"error": "No order IDs provided."}), 400
+    cdp_port = int(os.environ.get("CDP_PORT", 9222))
+    try:
+        results = download_invoices(order_ids, cdp_port=cdp_port)
+        return jsonify({"results": results})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
