@@ -30,6 +30,7 @@
     .select-all-row { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; font-size: .85rem; color: #4a5568; }
     table { width: 100%; border-collapse: collapse; font-size: .85rem; }
     thead th { background: #edf2f7; padding: 10px 12px; text-align: left; font-weight: 600; color: #4a5568; border-bottom: 2px solid #e2e8f0; }
+    thead th:nth-child(4), td:nth-child(4) { min-width: 260px; word-break: break-word; }
     tbody tr { border-bottom: 1px solid #e2e8f0; }
     tbody tr:hover { background: #f7fafc; }
     tbody tr.in-sheet { opacity: .5; }
@@ -75,6 +76,7 @@
       <div class="select-all-row">
         <label><input type="checkbox" id="select-eligible" onchange="selectEligible(this.checked)" /> Select all eligible (not yet in sheet)</label>
         <label><input type="checkbox" id="select-all" onchange="selectAll(this.checked)" /> Select all</label>
+        <button class="btn btn-sm btn-outline" id="filter-eligible-btn" onclick="toggleEligibleFilter()" style="display:none;margin-left:auto">Show Eligible Only</button>
       </div>
       <table>
         <thead>
@@ -99,6 +101,7 @@
   <script>
     let allOrders = [];
     let lastScanCost = null;
+    let showEligibleOnly = false;
 
     async function runScan() {
       const btn = document.getElementById('scan-btn');
@@ -122,6 +125,7 @@
         }
         allOrders = data.orders;
         lastScanCost = data.scan_cost ?? null;
+        showEligibleOnly = false;
         renderTable(allOrders);
       } catch (e) {
         setStatus('err', 'Network error: ' + e.message);
@@ -152,6 +156,8 @@
 
       orders.forEach((o, i) => {
         const tr = document.createElement('tr');
+        tr.dataset.eligible = o.eligible_category ? 'true' : 'false';
+        if (showEligibleOnly && !o.eligible_category) tr.style.display = 'none';
         if (o.in_sheet) tr.classList.add('in-sheet');
 
         const categoryTag = o.eligible_category
@@ -179,6 +185,11 @@
       document.getElementById('results-section').style.display = 'block';
       document.getElementById('log-pdf-btn').disabled = false;
       document.getElementById('log-btn').disabled = false;
+      const filterBtn = document.getElementById('filter-eligible-btn');
+      filterBtn.style.display = '';
+      filterBtn.textContent = showEligibleOnly ? 'Show All' : 'Show Eligible Only';
+      filterBtn.style.background = showEligibleOnly ? '#3182ce' : '';
+      filterBtn.style.color = showEligibleOnly ? '#fff' : '';
       setStatus('ok', `Scan complete — ${orders.length} order(s) found.`);
     }
 
@@ -200,6 +211,17 @@
         cb.checked = checked;
       });
       document.getElementById('select-eligible').checked = false;
+    }
+
+    function toggleEligibleFilter() {
+      showEligibleOnly = !showEligibleOnly;
+      const btn = document.getElementById('filter-eligible-btn');
+      btn.textContent = showEligibleOnly ? 'Show All' : 'Show Eligible Only';
+      btn.style.background = showEligibleOnly ? '#3182ce' : '';
+      btn.style.color = showEligibleOnly ? '#fff' : '';
+      document.querySelectorAll('#orders-table tr').forEach(tr => {
+        tr.style.display = (showEligibleOnly && tr.dataset.eligible === 'false') ? 'none' : '';
+      });
     }
 
     async function _doLog(selected) {

@@ -287,7 +287,7 @@ def _parse_order_email(msg) -> dict | None:
     # Purchase date from email Date header
     try:
         dt = parsedate_to_datetime(date_header)
-        purchase_date = dt.strftime("%m/%d/%y")
+        purchase_date = dt.strftime("%Y-%m-%d")
     except Exception:
         purchase_date = ""
 
