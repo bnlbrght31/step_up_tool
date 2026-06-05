@@ -130,7 +130,9 @@ def batch_check_eligibility(descriptions: list) -> list:
 
     def _call_claude(chunk: list) -> list:
         nonlocal total_in, total_out
-        numbered = "\n".join(f"{i+1}. {d}" for i, d in enumerate(chunk))
+        # Send as JSON array so special characters (quotes, slashes) don't confuse parsing.
+        # Ask for a JSON object keyed by index so a missing entry doesn't shift all results.
+        items_json = _json.dumps(chunk)
         prompt = f"""You are checking whether Amazon purchase descriptions are eligible for the Step Up For Students (SUFS) scholarship reimbursement program in Florida.
 
 Use the purchasing guide below to decide eligibility.
@@ -139,13 +141,13 @@ Use the purchasing guide below to decide eligibility.
 {guide}
 --- END GUIDE ---
 
-For each numbered item below, return the top-level SUFS category if eligible, or null if not eligible (e.g. personal clothing, adult items, household goods unrelated to education).
+Below is a JSON array of Amazon item descriptions (0-indexed). For each index return the top-level SUFS category if eligible, or null if not eligible (e.g. personal clothing, adult items, household goods unrelated to education).
 
 Items:
-{numbered}
+{items_json}
 
-Return ONLY a valid JSON array with one entry per item, in order. Each entry is either a category string or null. Example:
-["Books", null, "Physical Education", "Learning Manipulatives & Creative Play Items"]
+Return ONLY a valid JSON object mapping each index (as a string) to a category string or null. Example:
+{{"0": "Books", "1": null, "2": "Physical Education"}}
 
 No explanation, no markdown."""
 
@@ -160,15 +162,12 @@ No explanation, no markdown."""
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.strip()
-        result = _json.loads(raw)
-        if len(result) != len(chunk):
-            raise ValueError(f"Expected {len(chunk)} results, got {len(result)}")
+        result_map = _json.loads(raw)
         total_in += msg.usage.input_tokens
         total_out += msg.usage.output_tokens
-        return result
+        # Build list in order, falling back to keyword match for any missing index
+        return [result_map.get(str(i)) or check_eligibility(chunk[i]) for i in range(len(chunk))]
 
-    # Process in chunks of 50 to keep responses well within token limits
-    # Strip newlines from descriptions to avoid breaking the numbered list format
     CHUNK_SIZE = 50
     all_results = []
     for i in range(0, len(descriptions), CHUNK_SIZE):
