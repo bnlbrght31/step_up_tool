@@ -55,7 +55,11 @@
     <p class="sub">Scan Gmail for Amazon orders, flag SUFS-eligible items, and log them to your tracking sheet.</p>
 
     <div class="info-row">
-      <span class="badge" id="scan-range-badge">Scan range: loading…</span>
+      <label style="font-size:.85rem;color:#4a5568;display:flex;align-items:center;gap:8px;">
+        Scan from:
+        <input type="date" id="scan-from-date" style="padding:4px 8px;border:1px solid #cbd5e0;border-radius:6px;font-size:.85rem;" />
+      </label>
+      <span style="font-size:.8rem;color:#a0aec0;">defaults to last scan date or 07/01/2025</span>
     </div>
 
     <div id="status-bar" class="status-bar"></div>
@@ -104,7 +108,12 @@
       document.getElementById('empty-state').style.display = 'none';
 
       try {
-        const res = await fetch('/scan/run', { method: 'POST' });
+        const fromDate = document.getElementById('scan-from-date').value;
+        const res = await fetch('/scan/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from_date: fromDate || null }),
+        });
         const data = await res.json();
         if (!res.ok || data.error) {
           setStatus('err', 'Error: ' + (data.error || 'Unknown error'));
@@ -289,12 +298,13 @@
       bar.textContent = msg;
     }
 
-    // Show the default scan range on load
+    // Populate date picker with last scan date on load
     fetch('/scan/state')
       .then(r => r.json())
       .then(d => {
-        document.getElementById('scan-range-badge').textContent =
-          `Scan range: ${d.last_scan_date} → today (scholarship year)`;
+        // Convert YYYY/MM/DD → YYYY-MM-DD for the date input
+        const iso = d.last_scan_date.replace(/\//g, '-');
+        document.getElementById('scan-from-date').value = iso;
       })
       .catch(() => {});
   </script>

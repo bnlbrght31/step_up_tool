@@ -120,9 +120,11 @@ def scan_state():
 
 @app.route("/scan/run", methods=["POST"])
 def scan_run():
+    data = request.get_json() or {}
+    from_date = data.get("from_date")  # YYYY-MM-DD from date picker, or None
     try:
         existing = get_existing_order_numbers()
-        orders, after_date = scan_amazon_orders(existing)
+        orders, after_date = scan_amazon_orders(existing, from_date=from_date)
         return jsonify({"orders": orders, "after_date": after_date})
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 400

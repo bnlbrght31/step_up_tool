@@ -319,16 +319,21 @@ def _parse_order_email(msg) -> dict | None:
 # Main scan entry point
 # ---------------------------------------------------------------------------
 
-def scan_amazon_orders(existing_order_numbers: set) -> tuple[list, str]:
+def scan_amazon_orders(existing_order_numbers: set, from_date: str | None = None) -> tuple[list, str]:
     """
-    Search Gmail for Amazon order confirmations since last scan date.
+    Search Gmail for Amazon order confirmations since from_date (YYYY-MM-DD),
+    or the last scan date, or the scholarship year start if neither is set.
 
     Returns (orders, after_date_used).
     Each order dict has: order_number, purchase_date, description,
     total, eligible_category, in_sheet (bool).
     Deduplicates within the scan and against existing_order_numbers.
     """
-    after_date = load_last_scan()
+    if from_date:
+        # Convert YYYY-MM-DD → YYYY/MM/DD for Gmail query
+        after_date = from_date.replace("-", "/")
+    else:
+        after_date = load_last_scan()
     query = f'from:auto-confirm@amazon.com after:{after_date}'
 
     service = _get_gmail_service()
