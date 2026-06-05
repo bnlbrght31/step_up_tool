@@ -247,6 +247,9 @@
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Log failed');
       selected.forEach(o => { o.in_sheet = true; });
+      // Refresh date picker to show today (new scan start)
+      const today = new Date().toISOString().slice(0, 10);
+      document.getElementById('scan-from-date').value = today;
       return data.logged;
     }
 

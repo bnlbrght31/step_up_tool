@@ -264,6 +264,7 @@ def save_last_scan():
     """Save today as the last scan date."""
     today = datetime.now().strftime("%Y/%m/%d")
     SCAN_STATE_FILE.write_text(json.dumps({"last_scan_date": today}, indent=2))
+    print(f"[scanner] Scan date updated to {today}")
 
 
 # ---------------------------------------------------------------------------
