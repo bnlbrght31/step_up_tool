@@ -98,6 +98,7 @@
 
   <script>
     let allOrders = [];
+    let lastScanCost = null;
 
     async function runScan() {
       const btn = document.getElementById('scan-btn');
@@ -120,6 +121,7 @@
           return;
         }
         allOrders = data.orders;
+        lastScanCost = data.scan_cost ?? null;
         renderTable(allOrders);
       } catch (e) {
         setStatus('err', 'Network error: ' + e.message);
@@ -141,7 +143,7 @@
 
       const newCount = orders.filter(o => !o.in_sheet).length;
       const eligibleCount = orders.filter(o => o.eligible_category && !o.in_sheet).length;
-      const costStr = data.scan_cost !== undefined ? ` — API cost: $${data.scan_cost.toFixed(4)}` : '';
+      const costStr = lastScanCost !== null ? ` — API cost: $${lastScanCost.toFixed(4)}` : '';
       document.getElementById('summary-text').innerHTML =
         `Found <strong>${orders.length}</strong> orders — ` +
         `<strong>${newCount}</strong> not yet in sheet, ` +
