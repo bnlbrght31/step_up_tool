@@ -33,6 +33,16 @@
     #status.success { background: #c6f6d5; color: #276749; }
     #status.error { background: #fed7d7; color: #c53030; }
     #status.loading { background: #bee3f8; color: #2a4365; }
+    #log-panel { max-width: 900px; margin: 24px auto 0; background: #fff; border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.08); padding: 24px; display: none; }
+    #log-panel h2 { font-size: 1.1rem; color: #2d3748; margin-bottom: 6px; }
+    #log-panel p.sub { color: #718096; font-size: .88rem; margin-bottom: 18px; }
+    .log-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+    .log-fields label { display: block; font-size: .75rem; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+    .log-fields input { width: 100%; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: .9rem; background: #f7fafc; }
+    .log-fields input:focus { outline: none; border-color: #4299e1; background: #fff; }
+    #log-status { margin-top: 12px; padding: 10px 14px; border-radius: 6px; font-size: .88rem; display: none; }
+    #log-status.success { background: #c6f6d5; color: #276749; }
+    #log-status.error { background: #fed7d7; color: #c53030; }
   </style>
 </head>
 <body>
@@ -125,6 +135,23 @@
   <button class="btn btn-primary" onclick="submitItems()">Fill Form</button>
 </div>
 <div id="status"></div>
+
+<div id="log-panel">
+  <h2>Log Submission to Sheet</h2>
+  <p class="sub">After SUFS shows the confirmation page, paste the student name and reimbursement ID below, then click Log to Sheet.</p>
+  <div class="log-fields">
+    <div>
+      <label for="student-name">Student Name</label>
+      <input type="text" id="student-name" placeholder="e.g. Zechariah Albright" />
+    </div>
+    <div>
+      <label for="sufs-id">SUFS Reimbursement ID</label>
+      <input type="text" id="sufs-id" placeholder="e.g. 34405627" />
+    </div>
+  </div>
+  <button class="btn btn-primary" onclick="logToSheet()">Log to Sheet</button>
+  <div id="log-status"></div>
+</div>
 
 <script>
 // ---------------------------------------------------------------------------
@@ -243,12 +270,46 @@ async function submitItems() {
     if (data.success) {
       status.className = 'success';
       status.textContent = `✓ ${data.filled} item(s) filled. Switch to Chrome, review everything, then submit.`;
+      document.getElementById('log-panel').style.display = 'block';
     } else {
       status.className = 'error';
       status.textContent = 'Error: ' + (data.error || 'Unknown error');
     }
   } catch (e) {
     status.className = 'error'; status.textContent = 'Network error: ' + e.message;
+  }
+}
+
+async function logToSheet() {
+  const logStatus = document.getElementById('log-status');
+  const student = document.getElementById('student-name').value.trim();
+  const sufsId  = document.getElementById('sufs-id').value.trim();
+
+  if (!student || !sufsId) {
+    logStatus.className = 'error'; logStatus.style.display = 'block';
+    logStatus.textContent = 'Please enter both the student name and SUFS reimbursement ID.';
+    return;
+  }
+
+  logStatus.style.display = 'none';
+
+  try {
+    const res = await fetch('/log-submission', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ student, sufs_id: sufsId, items: collectItems() })
+    });
+    const data = await res.json();
+    if (data.success) {
+      logStatus.className = 'success'; logStatus.style.display = 'block';
+      logStatus.textContent = `✓ ${data.logged} row(s) logged to sheet with IDs ${sufsId}-1 through ${sufsId}-${data.logged}.`;
+    } else {
+      logStatus.className = 'error'; logStatus.style.display = 'block';
+      logStatus.textContent = 'Error: ' + (data.error || 'Unknown error');
+    }
+  } catch (e) {
+    logStatus.className = 'error'; logStatus.style.display = 'block';
+    logStatus.textContent = 'Network error: ' + e.message;
   }
 }
 </script>

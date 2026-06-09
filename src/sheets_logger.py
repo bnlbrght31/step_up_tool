@@ -10,7 +10,18 @@ import os
 
 SHEET_ID = os.environ.get("SUFS_SHEET_ID", "")
 TAB = "2025-2026"
+TESTING_TAB = "2025-2026 Testing"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+# Columns for TESTING_TAB:
+# A: Student | B: Item | C: Store | D: Invoice | E: Price | F: Purchase date
+# G: Status | H: SUFS Reimbursement ID | I: Date submitted
+# J: Date on hold | K: Date approved | L: Date paid
+_TESTING_KEYS = [
+    "student", "item", "store", "invoice", "price", "purchase_date",
+    "status", "sufs_reimb_id", "date_submitted",
+    "date_on_hold", "date_approved", "date_paid",
+]
 
 
 def _get_service():
@@ -36,6 +47,103 @@ def get_existing_order_numbers() -> set:
     except Exception as e:
         print(f"[sheets] Error reading order numbers: {e}")
         return set()
+
+
+def read_all_rows() -> list[dict]:
+    """
+    Read all data rows from the 2025-2026 tab.
+    Returns list of dicts with keys matching column headers + row_index (1-based, skipping header).
+    """
+    try:
+        svc = _get_service()
+        result = svc.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID,
+            range=f"{TAB}!A1:M500",
+        ).execute()
+        rows = result.get("values", [])
+        if not rows:
+            return []
+        header = rows[0]
+        keys = ["student", "item", "store", "order_number", "price",
+                "date_purchased", "status", "date_submitted", "date_reimbursed",
+                "date_paid", "reimbursement_id", "sufs_approved_date", "sufs_paid_date"]
+        data = []
+        for i, row in enumerate(rows[1:], start=2):  # row 2 = first data row
+            padded = row + [""] * (len(keys) - len(row))
+            data.append({k: padded[j] for j, k in enumerate(keys)} | {"row_index": i})
+        return data
+    except Exception as e:
+        print(f"[sheets] Error reading rows: {e}")
+        return []
+
+
+def write_reimbursement_id(row_index: int, reimb_id: str):
+    """Write a reimbursement ID to column K of the given row."""
+    batch_write_reimbursement_ids({row_index: reimb_id})
+
+
+def batch_write_reimbursement_ids(row_to_id: dict[int, str]):
+    """Write multiple reimbursement IDs to column K in a single API call."""
+    if not row_to_id:
+        return
+    import time
+    CHUNK = 50
+    items = list(row_to_id.items())
+    try:
+        svc = _get_service()
+        for i in range(0, len(items), CHUNK):
+            chunk = items[i:i + CHUNK]
+            svc.spreadsheets().values().batchUpdate(
+                spreadsheetId=SHEET_ID,
+                body={
+                    "valueInputOption": "RAW",
+                    "data": [
+                        {"range": f"{TAB}!K{row_index}", "values": [[reimb_id]]}
+                        for row_index, reimb_id in chunk
+                    ],
+                },
+            ).execute()
+            if i + CHUNK < len(items):
+                time.sleep(1.2)
+    except Exception as e:
+        print(f"[sheets] Error batch-writing reimbursement IDs: {e}")
+        raise
+
+
+def batch_write_sufs_status(updates: list[dict]):
+    """
+    Write SUFS approved/paid dates to columns L and M.
+    Each update: {row_index, approved_date, paid_date}  (empty string = skip)
+    Single API call for all rows.
+    """
+    if not updates:
+        return
+    data = []
+    for u in updates:
+        row = u["row_index"]
+        if u.get("approved_date"):
+            label = f"Partial ({u['approved_date']})" if u.get("approved_partial") else u["approved_date"]
+            data.append({"range": f"{TAB}!L{row}", "values": [[label]]})
+        if u.get("paid_date"):
+            label = f"Partial ({u['paid_date']})" if u.get("paid_partial") else u["paid_date"]
+            data.append({"range": f"{TAB}!M{row}", "values": [[label]]})
+    if not data:
+        return
+    import time
+    CHUNK = 50
+    try:
+        svc = _get_service()
+        for i in range(0, len(data), CHUNK):
+            chunk = data[i:i + CHUNK]
+            svc.spreadsheets().values().batchUpdate(
+                spreadsheetId=SHEET_ID,
+                body={"valueInputOption": "RAW", "data": chunk},
+            ).execute()
+            if i + CHUNK < len(data):
+                time.sleep(1.2)
+    except Exception as e:
+        print(f"[sheets] Error writing SUFS status: {e}")
+        raise
 
 
 def append_order(order: dict):
@@ -92,4 +200,102 @@ def append_orders(orders: list):
         ).execute()
     except Exception as e:
         print(f"[sheets] Error batch appending rows: {e}")
+        raise
+
+
+# ---------------------------------------------------------------------------
+# 2025-2026 Testing tab — per-line-item tracking
+# ---------------------------------------------------------------------------
+
+def log_submission_to_testing(student: str, sufs_id: str, items: list[dict], invoice_filename: str):
+    """
+    Write one row per selected line item to the 2025-2026 Testing tab.
+    items: list of item dicts with cost, tax, description, vendor, purchase_date.
+    Price = cost + tax.
+    """
+    from datetime import date as _date
+    today = _date.today().strftime("%m/%d/%Y")
+    rows = []
+    for i, item in enumerate(items, start=1):
+        cost = float(item.get("cost") or 0)
+        tax  = float(item.get("tax")  or 0)
+        price = round(cost + tax, 2)
+        rows.append([
+            student,
+            item.get("description") or "",
+            item.get("vendor") or "",
+            invoice_filename,
+            f"{price:.2f}",
+            item.get("purchase_date") or "",
+            "submitted",
+            f"{sufs_id}-{i}",
+            today,
+            "", "", "",  # date_on_hold, date_approved, date_paid
+        ])
+    try:
+        svc = _get_service()
+        svc.spreadsheets().values().append(
+            spreadsheetId=SHEET_ID,
+            range=f"{TESTING_TAB}!A1",
+            valueInputOption="RAW",
+            body={"values": rows},
+        ).execute()
+    except Exception as e:
+        print(f"[sheets] Error logging submission to testing tab: {e}")
+        raise
+
+
+def read_testing_rows() -> list[dict]:
+    """Read all data rows from the 2025-2026 Testing tab."""
+    try:
+        svc = _get_service()
+        result = svc.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID,
+            range=f"{TESTING_TAB}!A1:L500",
+        ).execute()
+        rows = result.get("values", [])
+        if not rows:
+            return []
+        data = []
+        for i, row in enumerate(rows[1:], start=2):  # row 2 = first data row
+            padded = row + [""] * (len(_TESTING_KEYS) - len(row))
+            data.append({k: padded[j] for j, k in enumerate(_TESTING_KEYS)} | {"row_index": i})
+        return data
+    except Exception as e:
+        print(f"[sheets] Error reading testing rows: {e}")
+        return []
+
+
+def batch_write_testing_status(updates: list[dict]):
+    """
+    Write status and date columns to the Testing tab.
+    Each update: {row_index, status?, on_hold_date?, approved_date?, paid_date?}
+    Column map: G=status, J=on_hold, K=approved, L=paid
+    """
+    if not updates:
+        return
+    data = []
+    col_map = {"status": "G", "on_hold_date": "J", "approved_date": "K", "paid_date": "L"}
+    for u in updates:
+        row = u["row_index"]
+        for field, col in col_map.items():
+            val = u.get(field, "")
+            if val:
+                data.append({"range": f"{TESTING_TAB}!{col}{row}", "values": [[val]]})
+    if not data:
+        return
+    import time
+    CHUNK = 50
+    try:
+        svc = _get_service()
+        for i in range(0, len(data), CHUNK):
+            chunk = data[i:i + CHUNK]
+            svc.spreadsheets().values().batchUpdate(
+                spreadsheetId=SHEET_ID,
+                body={"valueInputOption": "RAW", "data": chunk},
+            ).execute()
+            if i + CHUNK < len(data):
+                time.sleep(1.2)
+    except Exception as e:
+        print(f"[sheets] Error writing testing status: {e}")
         raise

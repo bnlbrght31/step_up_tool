@@ -1,9 +1,10 @@
 # SUFS Reimbursement Agent
 
-Two tools in one:
+Three tools in one:
 
-1. **Receipt parser** — reads a receipt PDF and automatically fills out your Step Up for Students reimbursement form in Chrome. You review everything — it never submits.
+1. **Receipt parser** — reads a receipt PDF and automatically fills out your Step Up for Students reimbursement form in Chrome. After you submit, logs each line item to your tracking sheet with one click.
 2. **Amazon order scanner** — scans your Gmail for Amazon order confirmation emails, flags SUFS-eligible purchases, marks returned items, and logs orders to your tracking spreadsheet with one click.
+3. **SUFS status scanner** — scans Gmail for SUFS approval, on-hold, and payment emails and writes dates and status back to your tracking sheet automatically.
 
 ---
 
@@ -182,6 +183,37 @@ Click **Fill Form**. Switch to your SUFS Chrome window and watch it fill in the 
 1. **Review everything carefully** in Chrome
 2. Make any corrections by hand
 3. **Submit the form yourself** — the agent never submits
+
+### Step 9 — Log the submission to your tracking sheet
+
+After SUFS shows the confirmation page with your reimbursement ID:
+
+1. Switch back to the app — a **Log Submission to Sheet** panel will have appeared
+2. Enter the **student name** and the **SUFS Reimbursement ID** from the confirmation page
+3. Click **Log to Sheet**
+
+This writes one row per line item to the `2025-2026 Testing` tab with:
+- All item details (description, vendor, price with tax, purchase date, invoice filename)
+- Status set to `submitted`
+- Today's date in Date Submitted
+- Line item IDs like `34405627-1`, `34405627-2`, etc.
+
+---
+
+## SUFS Status Scanner
+
+After SUFS sends approval, on-hold, or payment emails, run this to update your tracking sheet automatically:
+
+```bash
+python scan_testing_status.py
+```
+
+It scans Gmail for:
+- **On-hold emails** → sets Status = `on hold`, writes Date On Hold
+- **Approval emails** → sets Status = `approved`, writes Date Approved
+- **Payment/Remittance emails** → sets Status = `paid`, writes Date Paid
+
+The scanner matches emails to sheet rows using the reimbursement ID and dollar amount, shows you a preview, and asks for confirmation before writing anything. It's safe to re-run — rows that already have a date are skipped. Pass `--overwrite` to force-update existing values.
 
 ---
 
