@@ -151,11 +151,11 @@ python main.py
 python main.py
 ```
 
-You should see something like `Running on http://127.0.0.1:5050`. Leave this window open.
+You should see something like `Running on http://127.0.0.1:5054`. Leave this window open.
 
 ### Step 4 — Open the app in your browser
 
-Go to [http://127.0.0.1:5050](http://127.0.0.1:5050) in any browser (your regular Chrome is fine).
+Go to [http://127.0.0.1:5054](http://127.0.0.1:5054) in any browser (your regular Chrome is fine).
 
 ### Step 5 — Discover form options (first time per reimbursement session)
 
@@ -219,7 +219,7 @@ The scanner matches emails to sheet rows using the reimbursement ID and dollar a
 
 ## Amazon Order Scanner
 
-The scanner lives at [http://127.0.0.1:5050/scan](http://127.0.0.1:5050/scan) once the app is running. It requires two one-time setup steps.
+The scanner lives at [http://127.0.0.1:5054/scan](http://127.0.0.1:5054/scan) once the app is running. It requires two one-time setup steps.
 
 ### One-time setup for the scanner
 
@@ -243,7 +243,7 @@ The scanner logs orders to your tracking spreadsheet using a Google service acco
 
 ### Using the scanner
 
-1. Start the app (`python main.py`) and go to [http://127.0.0.1:5050/scan](http://127.0.0.1:5050/scan)
+1. Start the app (`python main.py`) and go to [http://127.0.0.1:5054/scan](http://127.0.0.1:5054/scan)
 2. The **Scan from** date defaults to your last scan date (or July 1 of the current scholarship year on first run). Change it if you want to go further back.
 3. Click **Scan Gmail** — this searches for Amazon order confirmation emails and checks each item for SUFS eligibility using Claude. Takes 30–60 seconds depending on how many emails are found.
 4. Review the results table:

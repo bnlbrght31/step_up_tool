@@ -73,7 +73,22 @@
       <div id="discover-status"></div>
     </div>
 
-    <a href="/scan" class="btn btn-outline btn-block" style="text-align:center;text-decoration:none;display:block;margin-bottom:16px;">🔍 Scan Amazon Orders</a>
+    <!-- Gmail Access -->
+    <div class="discover-section">
+      <h2>
+        Gmail Access
+        <span class="badge pending" id="gmail-badge">Checking…</span>
+      </h2>
+      <p id="gmail-desc">Used by the Amazon scanner and the SUFS status scans to read your email.</p>
+      <div class="discover-row">
+        <button class="btn btn-outline" id="gmail-auth-btn" onclick="authorizeGmail()">Re-authorize Gmail</button>
+      </div>
+      <div id="gmail-status" style="margin-top:8px;font-size:.82rem;"></div>
+    </div>
+
+    <a href="/scan" class="btn btn-outline btn-block" style="text-align:center;text-decoration:none;display:block;margin-bottom:10px;">🔍 Scan Amazon Orders</a>
+    <a href="/sufs-scan/main" class="btn btn-outline btn-block" style="text-align:center;text-decoration:none;display:block;margin-bottom:10px;">📬 Scan SUFS Statuses — Main tab</a>
+    <a href="/sufs-scan/testing" class="btn btn-outline btn-block" style="text-align:center;text-decoration:none;display:block;margin-bottom:16px;">📬 Scan SUFS Statuses — Testing tab</a>
 
     {% if error %}
     <div class="error">{{ error }}</div>
@@ -100,6 +115,75 @@
     document.getElementById('upload-form').addEventListener('submit', () => {
       btn.textContent = 'Parsing…'; btn.disabled = true;
     });
+
+    const gmailBadge = document.getElementById('gmail-badge');
+    const gmailStatus = document.getElementById('gmail-status');
+    const gmailBtn = document.getElementById('gmail-auth-btn');
+
+    function setBadge(text, ok) {
+      gmailBadge.textContent = text;
+      gmailBadge.className = 'badge ' + (ok ? 'done' : 'pending');
+    }
+
+    async function refreshGmailStatus() {
+      try {
+        const res = await fetch('/gmail/status');
+        const d = await res.json();
+        if (d.state === 'authorized') {
+          setBadge('✓ Authorized', true);
+          gmailStatus.className = 'ok';
+          gmailStatus.style.color = '#276749';
+          gmailStatus.textContent = d.email ? ('Signed in as ' + d.email) : 'Signed in.';
+          gmailBtn.textContent = 'Re-authorize Gmail';
+        } else if (d.state === 'no_creds') {
+          setBadge('No client secrets', false);
+          gmailStatus.style.color = '#c53030';
+          gmailStatus.textContent = 'gmail_oauth_credentials.json is missing — can’t authorize.';
+          gmailBtn.disabled = true;
+        } else {
+          // expired / missing / error
+          setBadge(d.state === 'missing' ? 'Not authorized' : 'Needs sign-in', false);
+          gmailStatus.style.color = '#c53030';
+          gmailStatus.textContent = d.state === 'missing'
+            ? 'Not authorized yet — click below to sign in.'
+            : 'Token expired or revoked — click below to re-authorize.';
+          gmailBtn.textContent = d.state === 'missing' ? 'Authorize Gmail' : 'Re-authorize Gmail';
+        }
+      } catch (e) {
+        setBadge('Unknown', false);
+        gmailStatus.style.color = '#c53030';
+        gmailStatus.textContent = 'Could not check status: ' + e.message;
+      }
+    }
+
+    async function authorizeGmail() {
+      gmailBtn.disabled = true;
+      const original = gmailBtn.textContent;
+      gmailBtn.textContent = 'Waiting for browser…';
+      gmailStatus.style.color = '#4a5568';
+      gmailStatus.textContent = 'A Google sign-in tab should open. Approve access there, then come back.';
+      try {
+        const res = await fetch('/gmail/auth', { method: 'POST' });
+        const d = await res.json();
+        if (d.success) {
+          gmailStatus.style.color = '#276749';
+          gmailStatus.textContent = '✓ Authorized' + (d.email ? ' as ' + d.email : '') + '.';
+          setBadge('✓ Authorized', true);
+        } else {
+          gmailStatus.style.color = '#c53030';
+          gmailStatus.textContent = 'Error: ' + (d.error || 'authorization failed');
+        }
+      } catch (e) {
+        gmailStatus.style.color = '#c53030';
+        gmailStatus.textContent = 'Network error: ' + e.message;
+      } finally {
+        gmailBtn.disabled = false;
+        gmailBtn.textContent = original;
+        refreshGmailStatus();
+      }
+    }
+
+    refreshGmailStatus();
 
     async function discoverOptions() {
       const status = document.getElementById('discover-status');

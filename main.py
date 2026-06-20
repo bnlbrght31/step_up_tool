@@ -11,6 +11,7 @@ load_dotenv()
 
 from src.amazon_scanner import load_last_scan, save_last_scan, scan_amazon_orders
 from src.browser_agent import discover_form_options, fill_form, inspect_form_elements, load_form_options
+from src.gmail_auth import reauthorize as gmail_reauthorize, token_status as gmail_token_status
 from src.models import LineItem
 from src.pdf_downloader import download_invoices
 from src.receipt_parser import parse_receipt
@@ -132,6 +133,62 @@ def log_submission():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/gmail/status")
+def gmail_status():
+    """Report whether the Gmail token is authorized / expired / missing."""
+    return jsonify(gmail_token_status())
+
+
+@app.route("/gmail/auth", methods=["POST"])
+def gmail_auth():
+    """
+    Run the interactive Gmail OAuth flow. This opens a browser tab for the
+    Google consent screen and blocks until you finish (or it times out).
+    """
+    try:
+        email = gmail_reauthorize(timeout_seconds=300)
+        return jsonify({"success": True, "email": email})
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"Authorization did not complete: {e}"}), 500
+
+
+@app.route("/sufs-scan/<tab>")
+def sufs_scan(tab):
+    from src.status_scan import TAB_META
+    if tab not in TAB_META:
+        return redirect(url_for("index"))
+    return render_template("sufs_status.html", tab=tab, meta=TAB_META[tab])
+
+
+@app.route("/sufs-scan/<tab>/preview", methods=["POST"])
+def sufs_scan_preview(tab):
+    from src.status_scan import PREVIEW
+    if tab not in PREVIEW:
+        return jsonify({"error": "Unknown tab."}), 400
+    overwrite = bool((request.get_json() or {}).get("overwrite"))
+    try:
+        return jsonify(PREVIEW[tab](overwrite=overwrite))
+    except Exception as e:
+        return jsonify({"error": f"{e}  (if this is an auth error, re-authorize Gmail on the home page)"}), 500
+
+
+@app.route("/sufs-scan/<tab>/apply", methods=["POST"])
+def sufs_scan_apply(tab):
+    from src.status_scan import APPLY
+    if tab not in APPLY:
+        return jsonify({"error": "Unknown tab."}), 400
+    updates = (request.get_json() or {}).get("updates", [])
+    if not updates:
+        return jsonify({"error": "No updates to write."}), 400
+    try:
+        written = APPLY[tab](updates)
+        return jsonify({"success": True, "written": written})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/scan")
 def scan():
     return render_template("scan.html")
@@ -184,5 +241,20 @@ def scan_pdfs():
         return jsonify({"error": str(e)}), 500
 
 
+def _app_port(default=5054):
+    """Resolve the HTTP port from the shared registry ($PORT still wins)."""
+    import sys
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "shared" / "ports.py").exists():
+            sys.path.insert(0, str(parent / "shared"))
+            try:
+                from ports import get_port
+                return get_port("step_up_tool", default=default)
+            except Exception:
+                break
+    return int(os.environ.get("PORT", default))
+
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5050)
+    # threaded so a blocking OAuth flow (/gmail/auth) doesn't freeze the UI
+    app.run(debug=True, port=_app_port(), threaded=True)

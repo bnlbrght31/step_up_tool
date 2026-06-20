@@ -10,14 +10,9 @@ Otherwise run this script once:
 
 It opens a browser window — sign in and approve access. Saves token.json.
 """
-import os
 from pathlib import Path
 
-from google_auth_oauthlib.flow import InstalledAppFlow
-
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-OAUTH_CREDS_FILE = os.environ.get("GMAIL_OAUTH_CREDS_FILE", "gmail_oauth_credentials.json")
-TOKEN_FILE = os.environ.get("GMAIL_TOKEN_FILE", "token.json")
+from src.gmail_auth import OAUTH_CREDS_FILE, TOKEN_FILE, reauthorize
 
 
 def main():
@@ -34,10 +29,9 @@ def main():
         print("  4. Re-run this script")
         return
 
-    flow = InstalledAppFlow.from_client_secrets_file(OAUTH_CREDS_FILE, SCOPES)
-    creds = flow.run_local_server(port=0)
-    Path(TOKEN_FILE).write_text(creds.to_json())
-    print(f"\nSuccess! {TOKEN_FILE} saved. Amazon scanner is ready.")
+    email = reauthorize()
+    suffix = f" ({email})" if email else ""
+    print(f"\nSuccess! {TOKEN_FILE} saved{suffix}. Gmail scanners are ready.")
 
 
 if __name__ == "__main__":
