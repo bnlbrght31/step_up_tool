@@ -13,6 +13,7 @@ from src.amazon_scanner import load_last_scan, save_last_scan, scan_amazon_order
 from src.browser_agent import discover_form_options, fill_form, inspect_form_elements, load_form_options
 from src.gmail_auth import reauthorize as gmail_reauthorize, token_status as gmail_token_status
 from src.models import LineItem
+from src.option_match import build_matches
 from src.pdf_downloader import download_invoices
 from src.receipt_parser import parse_receipt
 from src.sheets_logger import append_orders, get_existing_order_numbers, log_submission_to_testing
@@ -45,12 +46,13 @@ def upload():
     file.save(filepath)
 
     try:
-        items, parse_cost = parse_receipt(str(filepath))
+        items, parse_cost, reconciliation = parse_receipt(str(filepath))
     except Exception as e:
         return render_template("index.html", error=f"Failed to parse receipt: {e}", options_discovered=load_form_options() is not None)
 
     session["items"] = [item.to_dict() for item in items]
     session["parse_cost"] = parse_cost
+    session["reconciliation"] = reconciliation
     session["invoice_filename"] = secure_filename(file.filename)
     return redirect(url_for("confirm"))
 
@@ -62,9 +64,13 @@ def confirm():
         return redirect(url_for("index"))
     form_options = load_form_options()
     parse_cost = session.get("parse_cost")
+    matches = build_matches(items, form_options)
+    reconciliation = session.get("reconciliation")
     return render_template(
         "confirm.html",
         items=items,
+        matches=matches,
+        reconciliation=reconciliation,
         form_options_json=json.dumps(form_options) if form_options else "null",
         parse_cost=f"${parse_cost:.4f}" if parse_cost else None,
         enumerate=enumerate,

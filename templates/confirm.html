@@ -14,6 +14,12 @@
     .url-row label { font-size: .85rem; font-weight: 600; color: #4a5568; white-space: nowrap; }
     .url-row input { flex: 1; padding: 8px 12px; border: 1px solid #cbd5e0; border-radius: 6px; font-size: .9rem; }
     .warning-banner { max-width: 900px; margin: 0 auto 20px; background: #fef3cd; border: 1px solid #f6c23e; border-radius: 8px; padding: 12px 16px; font-size: .88rem; color: #744210; }
+    .recon-banner { max-width: 900px; margin: 0 auto 20px; border-radius: 8px; padding: 12px 16px; font-size: .88rem; }
+    .recon-banner.ok { background: #c6f6d5; color: #276749; border: 1px solid #9ae6b4; }
+    .recon-banner.warn { background: #fed7d7; color: #c53030; border: 1px solid #fc8181; }
+    .conf-badge { display: inline-block; font-size: .58rem; font-weight: 700; text-transform: uppercase; padding: 1px 6px; border-radius: 10px; margin-left: 6px; vertical-align: middle; cursor: help; }
+    .conf-badge.low { background: #fed7d7; color: #c53030; }
+    .conf-badge.medium { background: #feebc8; color: #b7791f; }
     .item-card { background: #fff; border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.08); padding: 20px 24px; margin: 0 auto 16px; max-width: 900px; }
     .item-card.excluded { opacity: .45; }
     .item-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
@@ -49,6 +55,7 @@
 
 <script>
   const FORM_OPTIONS = {{ form_options_json | safe }};
+  const RECON = {{ (reconciliation or {}) | tojson }};
 </script>
 
 <div class="page-header">
@@ -63,6 +70,10 @@
   ⚠ Make sure Chrome is running with remote debugging enabled and the SUFS form is open before clicking Fill Form.
 </div>
 
+{% if reconciliation and reconciliation.has_totals %}
+<div class="recon-banner {{ 'ok' if reconciliation.total_ok else 'warn' }}" id="recon-banner">Checking totals…</div>
+{% endif %}
+
 <div class="url-row">
   <label for="form-url">Form URL (optional — used if no SUFS tab is already open):</label>
   <input type="text" id="form-url" placeholder="https://apply.stepupforstudents.org/SubmitReimbursement/..." />
@@ -70,6 +81,7 @@
 
 <div id="items-container">
   {% for item in items %}
+  {% set m = matches[loop.index0] if matches else None %}
   <div class="item-card" id="card-{{ loop.index0 }}" data-index="{{ loop.index0 }}">
     <div class="item-header">
       <input type="checkbox" id="include-{{ loop.index0 }}" checked onchange="toggleCard({{ loop.index0 }})" />
@@ -83,23 +95,23 @@
       </div>
 
       <div class="field">
-        <label>Category</label>
+        <label>Category{% if m and m.category.confidence in ['low','medium'] %} <span class="conf-badge {{ m.category.confidence }}" title="Auto-matched from &quot;{{ m.category.raw }}&quot; — please verify">{{ m.category.confidence }}</span>{% endif %}</label>
         <select data-field="category" onchange="onCategoryChange({{ loop.index0 }}, this.value)" id="cat-{{ loop.index0 }}">
-          <option value="{{ item.category or '' }}">{{ item.category or '— loading —' }}</option>
+          <option value="{{ (m.category.value if m else item.category) or '' }}">{{ (m.category.value if m else item.category) or '— loading —' }}</option>
         </select>
       </div>
 
       <div class="field">
-        <label>Type</label>
+        <label>Type{% if m and m.type.confidence in ['low','medium'] %} <span class="conf-badge {{ m.type.confidence }}" title="Auto-matched from &quot;{{ m.type.raw }}&quot; — please verify">{{ m.type.confidence }}</span>{% endif %}</label>
         <select data-field="type" onchange="onTypeChange({{ loop.index0 }}, this.value)" id="type-{{ loop.index0 }}">
-          <option value="{{ item.type or '' }}">{{ item.type or '— loading —' }}</option>
+          <option value="{{ (m.type.value if m else item.type) or '' }}">{{ (m.type.value if m else item.type) or '— loading —' }}</option>
         </select>
       </div>
 
       <div class="field">
-        <label>Description</label>
+        <label>Description{% if m and m.description.confidence in ['low','medium'] %} <span class="conf-badge {{ m.description.confidence }}" title="Auto-matched from &quot;{{ m.description.raw }}&quot; — please verify">{{ m.description.confidence }}</span>{% endif %}</label>
         <select data-field="description" id="desc-{{ loop.index0 }}">
-          <option value="{{ item.description or '' }}">{{ item.description or '— loading —' }}</option>
+          <option value="{{ (m.description.value if m else item.description) or '' }}">{{ (m.description.value if m else item.description) or '— loading —' }}</option>
         </select>
       </div>
 
@@ -119,9 +131,9 @@
       </div>
 
       <div class="field">
-        <label>Vendor</label>
+        <label>Vendor{% if m and m.vendor.confidence in ['low','medium'] %} <span class="conf-badge {{ m.vendor.confidence }}" title="Auto-matched from &quot;{{ m.vendor.raw }}&quot; — please verify">{{ m.vendor.confidence }}</span>{% endif %}</label>
         <select data-field="vendor" id="vendor-{{ loop.index0 }}">
-          <option value="{{ item.vendor or '' }}">{{ item.vendor or '— loading —' }}</option>
+          <option value="{{ (m.vendor.value if m else item.vendor) or '' }}">{{ (m.vendor.value if m else item.vendor) or '— loading —' }}</option>
         </select>
       </div>
 
@@ -227,6 +239,36 @@ function initDropdowns() {
 document.addEventListener('DOMContentLoaded', initDropdowns);
 
 // ---------------------------------------------------------------------------
+// Live total reconciliation (receipt total vs. the items you're submitting)
+// ---------------------------------------------------------------------------
+
+function fmt(n) { return (n == null || isNaN(n)) ? '—' : Number(n).toFixed(2); }
+
+function recalcTotals() {
+  const banner = document.getElementById('recon-banner');
+  if (!banner || !RECON || !RECON.has_totals) return;
+  let cost = 0, tax = 0;
+  document.querySelectorAll('.item-card').forEach(card => {
+    const idx = card.dataset.index;
+    if (!document.getElementById('include-' + idx).checked) return;
+    cost += parseFloat(card.querySelector('[data-field=cost]').value) || 0;
+    tax  += parseFloat(card.querySelector('[data-field=tax]').value)  || 0;
+  });
+  const total = cost + tax;
+  const target = RECON.grand_total;
+  const diff = (target == null) ? null : (total - target);
+  const ok = (diff == null) ? true : Math.abs(diff) <= 0.02;
+  banner.className = 'recon-banner ' + (ok ? 'ok' : 'warn');
+  banner.innerHTML = `Receipt total: $${fmt(target)} &nbsp;·&nbsp; Your items: $${fmt(total)} `
+    + `<span style="opacity:.7">(subtotal $${fmt(cost)} + tax $${fmt(tax)})</span> &nbsp; `
+    + (ok ? '✓ matches the receipt'
+          : `⚠ off by $${fmt(Math.abs(diff))} — check item costs/tax before filling`);
+}
+
+document.addEventListener('DOMContentLoaded', recalcTotals);
+document.getElementById('items-container').addEventListener('input', recalcTotals);
+
+// ---------------------------------------------------------------------------
 // Card toggle
 // ---------------------------------------------------------------------------
 
@@ -234,6 +276,7 @@ function toggleCard(index) {
   document.getElementById('card-' + index).classList.toggle(
     'excluded', !document.getElementById('include-' + index).checked
   );
+  recalcTotals();
 }
 
 // ---------------------------------------------------------------------------
