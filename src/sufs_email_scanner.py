@@ -117,7 +117,7 @@ def scan_approved_emails(after_date: str = None) -> list[dict]:
 
         reimb   = re.search(r"Reimbursement ID:\s*(\d+)", body)
         student = re.search(r"Student['’]s Name:\s*(.+)", body)
-        amount  = re.search(r"in the amount of \$([\d,.]+)", body)
+        amount  = re.search(r"in the amount of \$([\d,]+(?:\.\d+)?)", body)
         cat     = re.search(r"reimbursement request for (.+?) in the amount", body)
 
         results.append({
@@ -211,7 +211,7 @@ def scan_on_hold_emails(after_date: str = None) -> list[dict]:
 
         reimb   = re.search(r"Reimbursement ID:\s*(\d+)", body)
         student = re.search(r"Student['']s Name:\s*(.+)", body)
-        amount  = re.search(r"in the amount of \$([\d,.]+)", body)
+        amount  = re.search(r"in the amount of \$([\d,]+(?:\.\d+)?)", body)
 
         results.append({
             "reimbursement_id": reimb.group(1).strip()   if reimb   else None,
@@ -413,10 +413,19 @@ def build_status_updates(
 # ---------------------------------------------------------------------------
 
 def _parse_amount(s: str) -> float:
-    """Parse a dollar amount string like '76.36' or '1,234.56' to float."""
+    """Parse a dollar amount like '76.36', '1,234.56', or '199.99.' to float.
+
+    Extracts the numeric token so trailing punctuation (e.g. a sentence-ending
+    period captured by the email regex) doesn't break parsing.
+    """
+    if not s:
+        return 0.0
+    m = re.search(r"\d[\d,]*(?:\.\d+)?", str(s))
+    if not m:
+        return 0.0
     try:
-        return float(s.replace(",", ""))
-    except (TypeError, ValueError):
+        return float(m.group(0).replace(",", ""))
+    except ValueError:
         return 0.0
 
 
@@ -490,7 +499,16 @@ def build_testing_status_updates(
             matched = [r for r in candidates if _amount_matches(amt, r.get("price", ""))]
             if matched:
                 return matched
-        # Fall back: all rows for this top-level ID (whole request on hold / all approved)
+            # Amount given but it matched no single line. Only treat it as a
+            # whole-request action if it equals the request total; otherwise
+            # it's a partial approval/hold we can't pinpoint — don't over-mark
+            # every line item (that's what marked all of 35208591 "approved").
+            ea = _parse_amount(amt)
+            total = sum(_parse_amount(r.get("price", "")) for r in candidates)
+            if ea > 0 and abs(ea - total) <= 0.02:
+                return candidates
+            return []
+        # No amount at all in the email — assume the whole request.
         return candidates
 
     # --- On hold ---
