@@ -99,7 +99,7 @@ def apply_main(updates):
 
 
 # ---------------------------------------------------------------------------
-# Testing tab (2025-2026 Testing): G=Status, J=On Hold, K=Approved, L=Paid
+# Line Items tab (2025-2026 Line Items): G=Status, J=On Hold, K=Approved, L=Paid
 # ---------------------------------------------------------------------------
 
 def preview_testing(overwrite=False):
@@ -134,7 +134,7 @@ def preview_testing(overwrite=False):
         new_u["item"] = (row.get("item", "") or "")[:60]
         out.append(new_u)
     return {
-        "tab": "2025-2026 Testing",
+        "tab": "2025-2026 Line Items",
         "scanned": {"on_hold": len(on_hold), "approved": len(approved),
                     "paid": len(paid), "remittance": len(remittance)},
         "updates": out,
@@ -163,6 +163,6 @@ APPLY = {"main": apply_main, "testing": apply_testing}
 
 TAB_META = {
     "main": {"title": "Main tab (2025-2026)", "cols": ["approved_date", "paid_date"]},
-    "testing": {"title": "Testing tab (2025-2026 Testing)",
+    "testing": {"title": "Line Items (2025-2026 Line Items)",
                 "cols": ["status", "on_hold_date", "approved_date", "paid_date"]},
 }

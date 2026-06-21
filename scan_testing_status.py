@@ -1,5 +1,5 @@
 """
-Scan Gmail for SUFS status emails and write dates to the '2025-2026 Testing' tab.
+Scan Gmail for SUFS status emails and write dates to the '2025-2026 Line Items' tab.
 
 Columns updated:
   G = Status (on hold / approved / paid)
@@ -29,7 +29,7 @@ AFTER_DATE = "2025/07/01"
 def main():
     overwrite = "--overwrite" in sys.argv
 
-    print("=== Reading 2025-2026 Testing tab ===")
+    print("=== Reading 2025-2026 Line Items tab ===")
     sheet_rows = read_testing_rows()
     print(f"  {len(sheet_rows)} rows")
 

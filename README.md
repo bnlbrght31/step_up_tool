@@ -192,7 +192,7 @@ After SUFS shows the confirmation page with your reimbursement ID:
 2. Enter the **student name** and the **SUFS Reimbursement ID** from the confirmation page
 3. Click **Log to Sheet**
 
-This writes one row per line item to the `2025-2026 Testing` tab with:
+This writes one row per line item to the `2025-2026 Line Items` tab with:
 - All item details (description, vendor, price with tax, purchase date, invoice filename)
 - Status set to `submitted`
 - Today's date in Date Submitted

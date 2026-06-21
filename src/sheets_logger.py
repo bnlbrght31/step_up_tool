@@ -10,8 +10,18 @@ import os
 
 SHEET_ID = os.environ.get("SUFS_SHEET_ID", "")
 TAB = "2025-2026"
-TESTING_TAB = "2025-2026 Testing"
+LINE_ITEMS_TAB = "2025-2026 Line Items"
+# The per-line-item scanner and the submission logger both target the Line Items
+# tab now (the old "2025-2026 Testing" tab was merged into it).
+TESTING_TAB = LINE_ITEMS_TAB
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+# Display header for the testing / line-items layout (order matches _TESTING_KEYS).
+TESTING_HEADER = [
+    "Student", "Item", "Store", "Invoice", "Price", "Date Purchased",
+    "Status", "SUFS Reimbursement ID", "Date Submitted",
+    "Date On Hold", "Date Approved", "Date Paid",
+]
 
 # Columns for TESTING_TAB:
 # A: Student | B: Item | C: Store | D: Invoice | E: Price | F: Purchase date
@@ -264,6 +274,45 @@ def read_testing_rows() -> list[dict]:
     except Exception as e:
         print(f"[sheets] Error reading testing rows: {e}")
         return []
+
+
+def tab_exists(title: str) -> bool:
+    svc = _get_service()
+    meta = svc.spreadsheets().get(spreadsheetId=SHEET_ID).execute()
+    return any(s["properties"]["title"] == title for s in meta.get("sheets", []))
+
+
+def create_tab(title: str, header: list | None = None) -> bool:
+    """Create a new tab (optionally writing a header row). Returns False if it already exists."""
+    svc = _get_service()
+    meta = svc.spreadsheets().get(spreadsheetId=SHEET_ID).execute()
+    if any(s["properties"]["title"] == title for s in meta.get("sheets", [])):
+        return False
+    svc.spreadsheets().batchUpdate(
+        spreadsheetId=SHEET_ID,
+        body={"requests": [{"addSheet": {"properties": {"title": title}}}]},
+    ).execute()
+    if header:
+        svc.spreadsheets().values().update(
+            spreadsheetId=SHEET_ID,
+            range=f"{title}!A1",
+            valueInputOption="RAW",
+            body={"values": [header]},
+        ).execute()
+    return True
+
+
+def append_rows(title: str, rows: list[list]):
+    """Append rows to a tab by title."""
+    if not rows:
+        return
+    svc = _get_service()
+    svc.spreadsheets().values().append(
+        spreadsheetId=SHEET_ID,
+        range=f"{title}!A1",
+        valueInputOption="RAW",
+        body={"values": rows},
+    ).execute()
 
 
 def batch_write_testing_status(updates: list[dict]):
