@@ -13,7 +13,11 @@ import os
 import re
 from datetime import datetime
 
-SUFS_SENDER = "no-reply@sufs.org"
+# SUFS sends from two address variants — approvals/on-hold use the hyphenated
+# "no-reply@sufs.org", while payment notifications come from the un-hyphenated
+# "noreply@sufs.org". Match both so direct-to-Gmail payment emails are caught
+# (these used to be forwarded via the Arizona account, masking the mismatch).
+SUFS_SENDER = "(no-reply@sufs.org OR noreply@sufs.org)"
 GMAIL_TOKEN_FILE = "token.json"
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
