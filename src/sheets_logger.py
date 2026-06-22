@@ -53,19 +53,29 @@ def _get_service():
 
 
 def get_existing_order_numbers() -> set:
-    """Read column D (Order number) from the Unsubmitted staging tab as a set."""
-    try:
-        svc = _get_service()
-        result = svc.spreadsheets().values().get(
-            spreadsheetId=SHEET_ID,
-            range=f"{UNSUBMITTED_TAB}!D:D",
-        ).execute()
-        rows = result.get("values", [])
-        # Row 0 is the header; skip it
-        return {row[0].strip() for row in rows[1:] if row and row[0].strip()}
-    except Exception as e:
-        print(f"[sheets] Error reading order numbers: {e}")
-        return set()
+    """Order numbers the scanner should treat as already handled.
+
+    Union of:
+      - Unsubmitted!D (orders already staged), and
+      - Line Items!D (the Invoice column — already-submitted Amazon orders carry
+        their order number here).
+
+    So an order that's been submitted is auto-skipped (no re-staging) without any
+    separate "submitted" marking.
+    """
+    svc = _get_service()
+
+    def _col(tab: str) -> set:
+        try:
+            rows = svc.spreadsheets().values().get(
+                spreadsheetId=SHEET_ID, range=f"{tab}!D:D",
+            ).execute().get("values", [])
+            return {r[0].strip() for r in rows[1:] if r and r[0].strip()}  # skip header
+        except Exception as e:
+            print(f"[sheets] Error reading {tab}!D: {e}")
+            return set()
+
+    return _col(UNSUBMITTED_TAB) | _col(LINE_ITEMS_TAB)
 
 
 def read_all_rows() -> list[dict]:
