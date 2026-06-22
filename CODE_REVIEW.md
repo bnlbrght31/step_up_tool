@@ -1,6 +1,18 @@
 # Code Review & Enhancement Ideas — step_up_tool (2026-06-14)
 
-_Findings log; no code was changed. Scope: `main.py`, `src/` (receipt_parser, browser_agent, amazon_scanner, sufs_email_scanner, reimbursement_scraper, sheets_logger, models, pdf_downloader)._
+_Findings log. Scope: `main.py`, `src/` (receipt_parser, browser_agent, amazon_scanner, sufs_email_scanner, reimbursement_scraper, sheets_logger, models, pdf_downloader)._
+
+## Status — implemented 2026-06-21
+Most of this review has since been built:
+- ✅ **#1 Python-side tax/total reconciliation** (`receipt_parser.py`): per-item cost + receipt total tax extracted, tax distributed in whole cents in Python, with a live "receipt total vs. your items" banner on the confirm page.
+- ✅ **#2 Option snapping with confidence** (`option_match.py`): parsed labels fuzzy-matched to the discovered form options, low/medium matches badged on the confirm page; weak matches keep the extracted text.
+- ✅ **#3 Post-fill verification**: `fill_form` reads each field back out of the form (DOM, no API) and the confirm page shows "sent vs. in form", flagging blanks/mismatches.
+- ✅ **#4 Sheets logging loop**: wired into the confirm flow (Log to Sheet → `2025-2026 Line Items`).
+- ✅ **#5 Debug + secret**: binds 127.0.0.1, debug off unless `FLASK_DEBUG`, `SECRET_KEY` from env with a random fallback (no weak default).
+- ✅ **#6 Auto-clean uploads**: the receipt PDF is deleted after parsing (personal data).
+- ✅ **#7 Never-submit guard**: `test_never_submit.py` fails if `browser_agent.py` ever clicks/targets a Submit control.
+
+Still open (lower priority): the optional screenshot/vision variant of #3, snapping for the (currently empty) description map, and the form-targeting CI harness (#5 under enhancements).
 
 ## What it does
 Flask app that parses a Step Up For Students receipt PDF with Claude, lets the user confirm line items, then drives the user's **own** Chrome (via CDP) to fill the SUFS reimbursement form. Also scans Amazon order emails and reconciles reimbursement status from SUFS emails into Google Sheets.

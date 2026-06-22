@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import secrets
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -19,7 +20,7 @@ from src.receipt_parser import parse_receipt
 from src.sheets_logger import append_orders, get_existing_order_numbers, log_submission_to_testing
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-in-prod")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
 UPLOAD_DIR = Path("/tmp/sufs_uploads")
 ALLOWED_EXTENSIONS = {"pdf"}
@@ -49,6 +50,9 @@ def upload():
         items, parse_cost, reconciliation = parse_receipt(str(filepath))
     except Exception as e:
         return render_template("index.html", error=f"Failed to parse receipt: {e}", options_discovered=load_form_options() is not None)
+    finally:
+        # Receipts hold personal purchase data — don't leave them on disk.
+        filepath.unlink(missing_ok=True)
 
     session["items"] = [item.to_dict() for item in items]
     session["parse_cost"] = parse_cost
@@ -113,8 +117,8 @@ def fill():
     cdp_port = int(os.environ.get("CDP_PORT", 9222))
 
     try:
-        asyncio.run(fill_form(form_url=form_url, items=selected, cdp_port=cdp_port))
-        return jsonify({"success": True, "filled": len(selected)})
+        readback = asyncio.run(fill_form(form_url=form_url, items=selected, cdp_port=cdp_port))
+        return jsonify({"success": True, "filled": len(selected), "readback": readback})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -262,5 +266,9 @@ def _app_port(default=5054):
 
 
 if __name__ == "__main__":
-    # threaded so a blocking OAuth flow (/gmail/auth) doesn't freeze the UI
-    app.run(debug=True, port=_app_port(), threaded=True)
+    # Bind localhost only and keep debug off unless FLASK_DEBUG is set (this app
+    # drives the user's real logged-in browser via CDP, so the Werkzeug debugger
+    # is a sharper risk than usual). Threaded so a blocking OAuth flow
+    # (/gmail/auth) doesn't freeze the UI.
+    debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
+    app.run(host="127.0.0.1", port=_app_port(), debug=debug, threaded=True)

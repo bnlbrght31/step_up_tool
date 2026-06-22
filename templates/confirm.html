@@ -49,6 +49,16 @@
     #log-status { margin-top: 12px; padding: 10px 14px; border-radius: 6px; font-size: .88rem; display: none; }
     #log-status.success { background: #c6f6d5; color: #276749; }
     #log-status.error { background: #fed7d7; color: #c53030; }
+    #verify-panel { max-width: 900px; margin: 20px auto 0; background: #fff; border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.08); padding: 22px 24px; display: none; }
+    #verify-panel h2 { font-size: 1.1rem; color: #2d3748; margin-bottom: 4px; }
+    #verify-panel p.sub { color: #718096; font-size: .85rem; margin-bottom: 14px; }
+    #verify-panel .vitem { margin-top: 14px; }
+    #verify-panel .vitem strong { font-size: .9rem; color: #2d3748; }
+    #verify-panel table { width: 100%; border-collapse: collapse; font-size: .82rem; margin-top: 6px; }
+    #verify-panel th, #verify-panel td { text-align: left; padding: 5px 9px; border-bottom: 1px solid #edf2f7; }
+    #verify-panel th { color: #a0aec0; font-weight: 600; font-size: .72rem; text-transform: uppercase; }
+    #verify-panel tr.vwarn td { background: #fff5f5; color: #c53030; font-weight: 600; }
+    #verify-panel .vok { color: #38a169; }
   </style>
 </head>
 <body>
@@ -147,6 +157,7 @@
   <button class="btn btn-primary" onclick="submitItems()">Fill Form</button>
 </div>
 <div id="status"></div>
+<div id="verify-panel"></div>
 
 <div id="log-panel">
   <h2>Log Submission to Sheet</h2>
@@ -298,10 +309,46 @@ function collectItems() {
   });
 }
 
+function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+const VERIFY_FIELDS = ['purchase_date', 'category', 'type', 'description', 'vendor', 'quantity', 'cost', 'tax'];
+function isBlankSelect(v) { return !v || /^select\b/i.test(String(v).trim()); }
+
+// Show what actually landed in the form (read back from Chrome) next to what we sent.
+function renderVerification(submitted, readback) {
+  const panel = document.getElementById('verify-panel');
+  if (!readback || !readback.length) { panel.style.display = 'none'; return; }
+  let html = '<h2>Verification — what landed in the form</h2>'
+    + '<p class="sub">Read straight back from Chrome. Anything flagged didn’t match what you sent — fix it before you submit.</p>';
+  readback.forEach((rb, i) => {
+    const sub = submitted[i] || {};
+    let rows = '';
+    VERIFY_FIELDS.forEach(f => {
+      const sent = sub[f], got = rb[f];
+      let warn = false;
+      if (['category', 'type', 'description', 'vendor'].includes(f)) {
+        if (sent && isBlankSelect(got)) warn = true;          // dropdown silently left unselected
+      } else if (['cost', 'tax', 'quantity'].includes(f)) {
+        const a = parseFloat(sent), b = parseFloat(got);
+        if (!isNaN(a) && (isNaN(b) || Math.abs(a - b) > 0.01)) warn = true;
+      }
+      rows += `<tr class="${warn ? 'vwarn' : ''}"><td>${f.replace('_', ' ')}</td>`
+        + `<td>${esc(sent)}</td><td>${esc(got)}</td>`
+        + `<td>${warn ? '⚠' : '<span class="vok">✓</span>'}</td></tr>`;
+    });
+    html += `<div class="vitem"><strong>Item ${i + 1}</strong>`
+      + '<table><thead><tr><th>Field</th><th>Sent</th><th>In form</th><th></th></tr></thead>'
+      + `<tbody>${rows}</tbody></table></div>`;
+  });
+  panel.innerHTML = html;
+  panel.style.display = 'block';
+}
+
 async function submitItems() {
   const status = document.getElementById('status');
   status.className = 'loading'; status.style.display = 'block';
   status.textContent = 'Connecting to Chrome and filling form… please wait.';
+  const submittedIncluded = collectItems().filter(it => it.include);
 
   try {
     const res = await fetch('/fill', {
@@ -312,7 +359,8 @@ async function submitItems() {
     const data = await res.json();
     if (data.success) {
       status.className = 'success';
-      status.textContent = `✓ ${data.filled} item(s) filled. Switch to Chrome, review everything, then submit.`;
+      status.textContent = `✓ ${data.filled} item(s) filled. Check the verification below, then switch to Chrome and submit.`;
+      renderVerification(submittedIncluded, data.readback);
       document.getElementById('log-panel').style.display = 'block';
     } else {
       status.className = 'error';

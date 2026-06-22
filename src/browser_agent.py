@@ -397,10 +397,12 @@ async def _fill_item(page: Page, item: LineItem, index: int):
                 pass
 
     # --- Description: button right after type in the DOM ---
+    desc_el = None
     if item.description and type_el:
         desc_idx = await _next_btn_idx(type_el)
         if desc_idx is not None:
             await _bs_select(page, bs_btns.nth(desc_idx), item.description)
+            desc_el = await bs_btns.nth(desc_idx).element_handle()
 
     # --- Radzen numeric inputs ---
     if item.quantity is not None:
@@ -413,6 +415,7 @@ async def _fill_item(page: Page, item: LineItem, index: int):
     # --- Vendor: last button in this item's row ---
     # Each row ends with vendor, which is the last button before the next row's category button
     # (or last button overall for the last item). We find it using cat_el as the anchor.
+    vendor_el = None
     if cat_el:
         vendor_idx = await page.evaluate("""(catEl) => {
             const all = Array.from(document.querySelectorAll('button.dropdown-toggle.form-select'));
@@ -425,8 +428,35 @@ async def _fill_item(page: Page, item: LineItem, index: int):
         }""", cat_el)
         if vendor_idx is not None:
             await _handle_vendor_btn(page, item.vendor, bs_btns.nth(vendor_idx))
+            vendor_el = await bs_btns.nth(vendor_idx).element_handle()
 
     await page.wait_for_timeout(400)
+
+    # --- Read back what actually landed in the form (post-fill verification; no API) ---
+    async def _txt(el):
+        if not el:
+            return None
+        try:
+            return (await el.evaluate("e => (e.textContent || '').trim()")) or None
+        except Exception:
+            return None
+
+    async def _val(loc):
+        try:
+            return await loc.input_value()
+        except Exception:
+            return None
+
+    return {
+        "purchase_date": await _val(page.locator("#purchaseDate").nth(index)),
+        "category": await _txt(cat_el),
+        "type": await _txt(type_el),
+        "description": await _txt(desc_el),
+        "vendor": await _txt(vendor_el),
+        "quantity": await _val(page.locator('input[placeholder="Enter Quantity"]').nth(index)),
+        "cost": await _val(page.locator('input[placeholder="Enter Cost per Item"]').nth(index)),
+        "tax": await _val(page.locator('input[placeholder="Enter Additional Costs"]').nth(index)),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -440,8 +470,10 @@ async def fill_form(form_url: str, items: list[LineItem], cdp_port: int = 9222):
         browser: Browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
         page = await _get_sufs_page(browser, form_url)
 
+        readbacks = []
         for i, item in enumerate(items):
-            await _fill_item(page, item, i)
+            readbacks.append(await _fill_item(page, item, i))
 
         await page.bring_to_front()
         await browser.close()
+        return readbacks
