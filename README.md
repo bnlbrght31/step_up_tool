@@ -257,6 +257,11 @@ The scanner logs orders to your tracking spreadsheet using a Google service acco
    - **Log to Sheet Only** — appends to the sheet without downloading PDFs (use when Chrome isn't open)
 6. The scan date updates automatically after logging so the next scan picks up from today.
 
+Logged orders go to the **`Unsubmitted`** tab (created automatically on first
+log), one row per order — these are staged purchases you haven't filed with SUFS
+yet, so there are no per-line-item IDs. Once you submit a reimbursement, the
+receipt flow writes the line items to the `2025-2026 Line Items` tab.
+
 > The scanner never submits anything to SUFS — it only reads Gmail and writes to your own spreadsheet.
 
 ---

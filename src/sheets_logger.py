@@ -14,6 +14,9 @@ LINE_ITEMS_TAB = "2025-2026 Line Items"
 # The per-line-item scanner and the submission logger both target the Line Items
 # tab now (the old "2025-2026 Testing" tab was merged into it).
 TESTING_TAB = LINE_ITEMS_TAB
+# The Amazon scanner stages NOT-yet-submitted orders here, one row per order
+# (SUFS line-item IDs don't exist until a reimbursement is submitted).
+UNSUBMITTED_TAB = "Unsubmitted"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 # Display header for the testing / line-items layout (order matches _TESTING_KEYS).
@@ -21,6 +24,12 @@ TESTING_HEADER = [
     "Student", "Item", "Store", "Invoice", "Price", "Date Purchased",
     "Status", "SUFS Reimbursement ID", "Date Submitted",
     "Date On Hold", "Date Approved", "Date Paid",
+]
+
+# Header for the Unsubmitted staging tab (one row per Amazon order). Column D is
+# the order number, which get_existing_order_numbers reads to skip duplicates.
+UNSUBMITTED_HEADER = [
+    "Student", "Item", "Store", "Order Number", "Price", "Date Purchased", "Status",
 ]
 
 # Columns for TESTING_TAB:
@@ -44,12 +53,12 @@ def _get_service():
 
 
 def get_existing_order_numbers() -> set:
-    """Read column D (Order number) from the current year tab and return as a set."""
+    """Read column D (Order number) from the Unsubmitted staging tab as a set."""
     try:
         svc = _get_service()
         result = svc.spreadsheets().values().get(
             spreadsheetId=SHEET_ID,
-            range=f"{TAB}!D:D",
+            range=f"{UNSUBMITTED_TAB}!D:D",
         ).execute()
         rows = result.get("values", [])
         # Row 0 is the header; skip it
@@ -172,10 +181,11 @@ def append_order(order: dict):
         "",                              # G: Status (fill in manually)
     ]
     try:
+        create_tab(UNSUBMITTED_TAB, UNSUBMITTED_HEADER)  # no-op if it already exists
         svc = _get_service()
         svc.spreadsheets().values().append(
             spreadsheetId=SHEET_ID,
-            range=f"{TAB}!A1",
+            range=f"{UNSUBMITTED_TAB}!A1",
             valueInputOption="RAW",
             body={"values": [row]},
         ).execute()
@@ -201,10 +211,11 @@ def append_orders(orders: list):
         for o in orders
     ]
     try:
+        create_tab(UNSUBMITTED_TAB, UNSUBMITTED_HEADER)  # no-op if it already exists
         svc = _get_service()
         svc.spreadsheets().values().append(
             spreadsheetId=SHEET_ID,
-            range=f"{TAB}!A1",
+            range=f"{UNSUBMITTED_TAB}!A1",
             valueInputOption="RAW",
             body={"values": rows},
         ).execute()
