@@ -313,6 +313,8 @@ function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>]/g, c => ({'
 
 const VERIFY_FIELDS = ['purchase_date', 'category', 'type', 'description', 'vendor', 'quantity', 'cost', 'tax'];
 function isBlankSelect(v) { return !v || /^select\b/i.test(String(v).trim()); }
+// Parse a money-ish value tolerantly: the form reads back as "$49.99" / "1,234.56".
+function num(v) { return parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')); }
 
 // Show what actually landed in the form (read back from Chrome) next to what we sent.
 function renderVerification(submitted, readback) {
@@ -329,7 +331,7 @@ function renderVerification(submitted, readback) {
       if (['category', 'type', 'description', 'vendor'].includes(f)) {
         if (sent && isBlankSelect(got)) warn = true;          // dropdown silently left unselected
       } else if (['cost', 'tax', 'quantity'].includes(f)) {
-        const a = parseFloat(sent), b = parseFloat(got);
+        const a = num(sent), b = num(got);
         if (!isNaN(a) && (isNaN(b) || Math.abs(a - b) > 0.01)) warn = true;
       }
       rows += `<tr class="${warn ? 'vwarn' : ''}"><td>${f.replace('_', ' ')}</td>`
