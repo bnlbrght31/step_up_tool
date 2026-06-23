@@ -99,6 +99,13 @@ def main():
     batch_write_testing_status(updates)
     print(f"\nDone. {len(updates)} row(s) updated.")
 
+    try:
+        from src.overview import refresh_overview
+        refresh_overview()
+        print("Overview dashboard refreshed.")
+    except Exception as e:
+        print(f"(overview refresh skipped: {e})")
+
 
 if __name__ == "__main__":
     main()

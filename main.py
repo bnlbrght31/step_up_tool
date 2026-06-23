@@ -172,6 +172,15 @@ def sufs_scan(tab):
     return render_template("sufs_status.html", tab=tab, meta=TAB_META[tab])
 
 
+def _refresh_overview_safe():
+    """Rebuild the Overview dashboard + stamp 'last email scan'. Never fatal to a scan."""
+    try:
+        from src.overview import refresh_overview
+        refresh_overview()
+    except Exception as e:
+        print(f"[overview] refresh skipped: {e}")
+
+
 @app.route("/sufs-scan/<tab>/preview", methods=["POST"])
 def sufs_scan_preview(tab):
     from src.status_scan import PREVIEW
@@ -179,7 +188,9 @@ def sufs_scan_preview(tab):
         return jsonify({"error": "Unknown tab."}), 400
     overwrite = bool((request.get_json() or {}).get("overwrite"))
     try:
-        return jsonify(PREVIEW[tab](overwrite=overwrite))
+        result = PREVIEW[tab](overwrite=overwrite)
+        _refresh_overview_safe()  # you just ran the scanner — refresh + timestamp
+        return jsonify(result)
     except Exception as e:
         return jsonify({"error": f"{e}  (if this is an auth error, re-authorize Gmail on the home page)"}), 500
 
@@ -194,6 +205,7 @@ def sufs_scan_apply(tab):
         return jsonify({"error": "No updates to write."}), 400
     try:
         written = APPLY[tab](updates)
+        _refresh_overview_safe()  # data changed — rebuild the dashboard
         return jsonify({"success": True, "written": written})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
