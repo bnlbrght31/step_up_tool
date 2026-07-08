@@ -2,7 +2,6 @@
 Google Sheets logging for SUFS Amazon order tracking.
 Uses a service account (same credentials as the pickem app).
 
-The sheet has two tabs; we read/write only "2025-2026".
 Column order: Student | Item | Store | Order number | Price | Date Purchased | Status | ...
 """
 
@@ -10,12 +9,27 @@ import os
 
 SHEET_ID = os.environ.get("SUFS_SHEET_ID", "")
 TAB = "2025-2026"
-LINE_ITEMS_TAB = "2025-2026 Line Items"
-# The per-line-item scanner and the submission logger both target the Line Items
-# tab now (the old "2025-2026 Testing" tab was merged into it).
+
+# --- Scholarship-year line-item tabs ---------------------------------------
+# The scholarship year runs Jul 1 – Jun 30. Each year's submitted line items go
+# to their own tab. LINE_ITEMS_TAB is the *active* year: the submission logger
+# always writes here (and auto-creates it on first submission).
+#
+# ROLLOVER (do this each July): point LINE_ITEMS_TAB at the new year's tab and
+# append that name to LINE_ITEMS_TABS.
+LINE_ITEMS_TAB = "2026-2027 Line Items"
+
+# Every scholarship year's line-item tab, oldest → newest. The status scanner,
+# the Overview dashboard, and the order-dedup all read/write across ALL of these
+# so trailing approvals/payments on a prior year still land and the dashboard
+# reflects every active year. A tab that doesn't exist yet is skipped on read.
+LINE_ITEMS_TABS = ["2025-2026 Line Items", LINE_ITEMS_TAB]
+
+# Back-compat alias for the active submission tab.
 TESTING_TAB = LINE_ITEMS_TAB
 # The Amazon scanner stages NOT-yet-submitted orders here, one row per order
-# (SUFS line-item IDs don't exist until a reimbursement is submitted).
+# (SUFS line-item IDs don't exist until a reimbursement is submitted). Shared
+# across years — staged purchases aren't year-specific until they're submitted.
 UNSUBMITTED_TAB = "Unsubmitted"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -57,11 +71,11 @@ def get_existing_order_numbers() -> set:
 
     Union of:
       - Unsubmitted!D (orders already staged), and
-      - Line Items!D (the Invoice column — already-submitted Amazon orders carry
-        their order number here).
+      - every year's Line Items!D (the Invoice column — already-submitted Amazon
+        orders carry their order number here).
 
-    So an order that's been submitted is auto-skipped (no re-staging) without any
-    separate "submitted" marking.
+    So an order that's been submitted in any year is auto-skipped (no re-staging)
+    without any separate "submitted" marking.
     """
     svc = _get_service()
 
@@ -75,7 +89,10 @@ def get_existing_order_numbers() -> set:
             print(f"[sheets] Error reading {tab}!D: {e}")
             return set()
 
-    return _col(UNSUBMITTED_TAB) | _col(LINE_ITEMS_TAB)
+    seen = _col(UNSUBMITTED_TAB)
+    for tab in LINE_ITEMS_TABS:
+        seen |= _col(tab)
+    return seen
 
 
 def read_all_rows() -> list[dict]:
@@ -240,7 +257,9 @@ def append_orders(orders: list):
 
 def log_submission_to_testing(student: str, sufs_id: str, items: list[dict], invoice_filename: str):
     """
-    Write one row per selected line item to the 2025-2026 Testing tab.
+    Write one row per selected line item to the active scholarship-year Line
+    Items tab (LINE_ITEMS_TAB), creating that tab with headers if it's the first
+    submission of the year.
     items: list of item dicts with cost, tax, description, vendor, purchase_date.
     Price = cost + tax.
     """
@@ -264,37 +283,43 @@ def log_submission_to_testing(student: str, sufs_id: str, items: list[dict], inv
             "", "", "",  # date_on_hold, date_approved, date_paid
         ])
     try:
+        create_tab(LINE_ITEMS_TAB, TESTING_HEADER)  # no-op if it already exists
         svc = _get_service()
         svc.spreadsheets().values().append(
             spreadsheetId=SHEET_ID,
-            range=f"{TESTING_TAB}!A1",
+            range=f"{LINE_ITEMS_TAB}!A1",
             valueInputOption="RAW",
             body={"values": rows},
         ).execute()
     except Exception as e:
-        print(f"[sheets] Error logging submission to testing tab: {e}")
+        print(f"[sheets] Error logging submission to line items tab: {e}")
         raise
 
 
 def read_testing_rows() -> list[dict]:
-    """Read all data rows from the 2025-2026 Testing tab."""
-    try:
-        svc = _get_service()
-        result = svc.spreadsheets().values().get(
-            spreadsheetId=SHEET_ID,
-            range=f"{TESTING_TAB}!A1:L500",
-        ).execute()
-        rows = result.get("values", [])
-        if not rows:
-            return []
-        data = []
+    """Read all data rows across every scholarship-year Line Items tab.
+
+    Each row dict carries its source `tab` and a 1-based `row_index` within that
+    tab, so callers can route status writes back to the correct cell. Tabs that
+    don't exist yet (e.g. a freshly-rolled-over year before its first
+    submission) are skipped.
+    """
+    svc = _get_service()
+    data = []
+    for tab in LINE_ITEMS_TABS:
+        try:
+            rows = svc.spreadsheets().values().get(
+                spreadsheetId=SHEET_ID,
+                range=f"{tab}!A1:L500",
+            ).execute().get("values", [])
+        except Exception as e:
+            print(f"[sheets] Error reading {tab} rows: {e}")
+            continue
         for i, row in enumerate(rows[1:], start=2):  # row 2 = first data row
             padded = row + [""] * (len(_TESTING_KEYS) - len(row))
-            data.append({k: padded[j] for j, k in enumerate(_TESTING_KEYS)} | {"row_index": i})
-        return data
-    except Exception as e:
-        print(f"[sheets] Error reading testing rows: {e}")
-        return []
+            data.append({k: padded[j] for j, k in enumerate(_TESTING_KEYS)}
+                        | {"row_index": i, "tab": tab})
+    return data
 
 
 def tab_exists(title: str) -> bool:
@@ -338,20 +363,22 @@ def append_rows(title: str, rows: list[list]):
 
 def batch_write_testing_status(updates: list[dict]):
     """
-    Write status and date columns to the Testing tab.
-    Each update: {row_index, status?, on_hold_date?, approved_date?, paid_date?}
-    Column map: G=status, J=on_hold, K=approved, L=paid
+    Write status and date columns to each row's own Line Items tab.
+    Each update: {row_index, tab?, status?, on_hold_date?, approved_date?, paid_date?}
+    `tab` names the target Line Items tab; it defaults to the active year's tab
+    for back-compat. Column map: G=status, J=on_hold, K=approved, L=paid
     """
     if not updates:
         return
     data = []
     col_map = {"status": "G", "on_hold_date": "J", "approved_date": "K", "paid_date": "L"}
     for u in updates:
+        tab = u.get("tab") or LINE_ITEMS_TAB
         row = u["row_index"]
         for field, col in col_map.items():
             val = u.get(field, "")
             if val:
-                data.append({"range": f"{TESTING_TAB}!{col}{row}", "values": [[val]]})
+                data.append({"range": f"{tab}!{col}{row}", "values": [[val]]})
     if not data:
         return
     import time

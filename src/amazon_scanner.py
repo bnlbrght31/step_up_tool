@@ -12,7 +12,9 @@ from datetime import datetime
 from pathlib import Path
 
 SCAN_STATE_FILE = Path("scan_state.json")
-SCHOLARSHIP_START = "2025/07/01"
+# Start of the current scholarship year (Jul 1 – Jun 30); used as the default
+# "scan from" date when no prior scan state exists. Bump each July at rollover.
+SCHOLARSHIP_START = "2026/07/01"
 
 GMAIL_TOKEN_FILE = "token.json"
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]

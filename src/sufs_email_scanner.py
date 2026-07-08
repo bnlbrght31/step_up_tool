@@ -468,18 +468,22 @@ def build_testing_status_updates(
         by_top_id[top].append(row)
         by_line_id[rid] = row
 
-    updates: dict[int, dict] = {}
+    # Keyed by (tab, row_index): the same row number can exist in more than one
+    # year's Line Items tab, so tab is part of a row's identity.
+    updates: dict[tuple, dict] = {}
 
-    def _ensure(row_index: int) -> dict:
-        if row_index not in updates:
-            updates[row_index] = {
-                "row_index":    row_index,
+    def _ensure(row: dict) -> dict:
+        key = (row.get("tab"), row["row_index"])
+        if key not in updates:
+            updates[key] = {
+                "tab":          row.get("tab"),
+                "row_index":    row["row_index"],
                 "status":       "",
                 "on_hold_date": "",
                 "approved_date": "",
                 "paid_date":    "",
             }
-        return updates[row_index]
+        return updates[key]
 
     def _rows_for_email(email: dict, email_type: str) -> list[dict]:
         """
@@ -515,7 +519,7 @@ def build_testing_status_updates(
     for email in on_hold:
         date = email.get("date", "")
         for row in _rows_for_email(email, "on_hold"):
-            u = _ensure(row["row_index"])
+            u = _ensure(row)
             u["on_hold_date"] = date
             if not u["status"]:
                 u["status"] = "on hold"
@@ -524,7 +528,7 @@ def build_testing_status_updates(
     for email in approved:
         date = email.get("date", "")
         for row in _rows_for_email(email, "approved"):
-            u = _ensure(row["row_index"])
+            u = _ensure(row)
             u["approved_date"] = date
             if u["status"] != "paid":
                 u["status"] = "approved"
@@ -536,7 +540,7 @@ def build_testing_status_updates(
             for lid in email.get("line_items", []):
                 row = by_line_id.get(lid)
                 if row:
-                    u = _ensure(row["row_index"])
+                    u = _ensure(row)
                     u["paid_date"] = date
                     u["status"] = "paid"
 

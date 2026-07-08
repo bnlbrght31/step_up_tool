@@ -15,6 +15,7 @@ import json
 import os
 
 from src.sheets_logger import (
+    LINE_ITEMS_TABS as TESTING_TABS,
     batch_write_sufs_status,
     batch_write_testing_status,
     read_all_rows,
@@ -32,8 +33,13 @@ from src.sufs_email_scanner import (
 AFTER_DATE = "2025/07/01"  # scholarship-year start — only look at emails from here on
 
 
-def _row_by_index(rows, idx):
-    return next((r for r in rows if r["row_index"] == idx), {})
+def _row_by_index(rows, idx, tab=None):
+    # tab is part of a row's identity once we read across multiple year tabs.
+    return next(
+        (r for r in rows
+         if r["row_index"] == idx and (tab is None or r.get("tab") == tab)),
+        {},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +105,9 @@ def apply_main(updates):
 
 
 # ---------------------------------------------------------------------------
-# Line Items tab (2025-2026 Line Items): G=Status, J=On Hold, K=Approved, L=Paid
+# Line Items tabs (all scholarship years): G=Status, J=On Hold, K=Approved, L=Paid
+# Reads/writes across every tab in LINE_ITEMS_TABS; each row carries its source
+# tab so writes route back to the correct year.
 # ---------------------------------------------------------------------------
 
 def preview_testing(overwrite=False):
@@ -113,8 +121,9 @@ def preview_testing(overwrite=False):
 
     out = []
     for u in updates:
-        row = _row_by_index(rows, u["row_index"])
+        row = _row_by_index(rows, u["row_index"], u.get("tab"))
         new_u = {
+            "tab": u.get("tab"),
             "row_index": u["row_index"],
             "status": u.get("status", "") or "",
             "on_hold_date": u.get("on_hold_date", "") or "",
@@ -134,7 +143,7 @@ def preview_testing(overwrite=False):
         new_u["item"] = (row.get("item", "") or "")[:60]
         out.append(new_u)
     return {
-        "tab": "2025-2026 Line Items",
+        "tab": " + ".join(TESTING_TABS),
         "scanned": {"on_hold": len(on_hold), "approved": len(approved),
                     "paid": len(paid), "remittance": len(remittance)},
         "updates": out,
@@ -145,6 +154,7 @@ def apply_testing(updates):
     clean = []
     for u in updates:
         item = {
+            "tab": u.get("tab"),
             "row_index": int(u["row_index"]),
             "status": u.get("status", "") or "",
             "on_hold_date": u.get("on_hold_date", "") or "",
@@ -163,6 +173,6 @@ APPLY = {"main": apply_main, "testing": apply_testing}
 
 TAB_META = {
     "main": {"title": "Main tab (2025-2026)", "cols": ["approved_date", "paid_date"]},
-    "testing": {"title": "Line Items (2025-2026 Line Items)",
+    "testing": {"title": "Line Items (" + " + ".join(TESTING_TABS) + ")",
                 "cols": ["status", "on_hold_date", "approved_date", "paid_date"]},
 }

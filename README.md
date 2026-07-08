@@ -192,7 +192,9 @@ After SUFS shows the confirmation page with your reimbursement ID:
 2. Enter the **student name** and the **SUFS Reimbursement ID** from the confirmation page
 3. Click **Log to Sheet**
 
-This writes one row per line item to the `2025-2026 Line Items` tab with:
+This writes one row per line item to the current scholarship year's Line Items
+tab (`2026-2027 Line Items`, created automatically on the first submission of the
+year) with:
 - All item details (description, vendor, price with tax, purchase date, invoice filename)
 - Status set to `submitted`
 - Today's date in Date Submitted
@@ -253,16 +255,37 @@ The scanner logs orders to your tracking spreadsheet using a Google service acco
    - **Yellow** badge = partial return (hover to see which item)
    - Use **Show Eligible Only** to hide ineligible and already-logged rows
 5. Check the boxes for items you want to log, then click:
-   - **Log to Sheet + Download PDFs** — appends to your Google Sheet and downloads invoice PDFs to `~/Desktop/SUFS/2025-2026/` via the SUFS Chrome window. Existing PDFs are skipped.
+   - **Log to Sheet + Download PDFs** — appends to your Google Sheet and downloads invoice PDFs to `~/Desktop/SUFS/2026-2027/` via the SUFS Chrome window. Existing PDFs are skipped.
    - **Log to Sheet Only** — appends to the sheet without downloading PDFs (use when Chrome isn't open)
 6. The scan date updates automatically after logging so the next scan picks up from today.
 
 Logged orders go to the **`Unsubmitted`** tab (created automatically on first
 log), one row per order — these are staged purchases you haven't filed with SUFS
-yet, so there are no per-line-item IDs. Once you submit a reimbursement, the
-receipt flow writes the line items to the `2025-2026 Line Items` tab.
+yet, so there are no per-line-item IDs. The `Unsubmitted` tab is shared across
+scholarship years. Once you submit a reimbursement, the receipt flow writes the
+line items to the current year's Line Items tab (`2026-2027 Line Items`).
 
 > The scanner never submits anything to SUFS — it only reads Gmail and writes to your own spreadsheet.
+
+---
+
+## Rolling over to a new scholarship year
+
+The scholarship year runs **July 1 – June 30**. Each year's submitted line items
+live in their own tab (e.g. `2025-2026 Line Items`, `2026-2027 Line Items`). The
+shared **`Unsubmitted`** staging tab carries over — it isn't year-specific.
+
+When a new year starts, make these changes (all one-liners):
+
+1. **`src/sheets_logger.py`** — point `LINE_ITEMS_TAB` at the new year's tab name
+   and add that name to the `LINE_ITEMS_TABS` list. New submissions go to the new
+   tab (auto-created on first submission); the status scanner and Overview keep
+   reading every tab in the list, so late approvals/payments on the prior year
+   still land and the dashboard reflects both years.
+2. **`src/pdf_downloader.py`** — bump `OUTPUT_DIR` to `~/Desktop/SUFS/<new-year>/`.
+3. **`src/amazon_scanner.py`** — bump `SCHOLARSHIP_START` to July 1 of the new year.
+
+That's it — everything else derives from those constants.
 
 ---
 

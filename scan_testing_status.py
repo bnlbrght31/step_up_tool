@@ -1,5 +1,7 @@
 """
-Scan Gmail for SUFS status emails and write dates to the '2025-2026 Line Items' tab.
+Scan Gmail for SUFS status emails and write dates to every scholarship-year
+Line Items tab (see LINE_ITEMS_TABS in src/sheets_logger.py). Trailing approvals
+and payments on a prior year still land on that year's tab.
 
 Columns updated:
   G = Status (on hold / approved / paid)
@@ -29,7 +31,7 @@ AFTER_DATE = "2025/07/01"
 def main():
     overwrite = "--overwrite" in sys.argv
 
-    print("=== Reading 2025-2026 Line Items tab ===")
+    print("=== Reading Line Items tabs (all scholarship years) ===")
     sheet_rows = read_testing_rows()
     print(f"  {len(sheet_rows)} rows")
 
@@ -60,7 +62,9 @@ def main():
     if not overwrite:
         filtered = []
         for u in updates:
-            row = next((r for r in sheet_rows if r["row_index"] == u["row_index"]), {})
+            row = next((r for r in sheet_rows
+                        if r["row_index"] == u["row_index"]
+                        and r.get("tab") == u.get("tab")), {})
             has_on_hold  = row.get("date_on_hold", "").strip()
             has_approved = row.get("date_approved", "").strip()
             has_paid     = row.get("date_paid", "").strip()
@@ -81,13 +85,16 @@ def main():
     # Preview
     print(f"\n  {len(updates)} row(s) to update:\n")
     for u in updates:
-        row = next((r for r in sheet_rows if r["row_index"] == u["row_index"]), {})
+        row = next((r for r in sheet_rows
+                    if r["row_index"] == u["row_index"]
+                    and r.get("tab") == u.get("tab")), {})
         parts = []
         if u.get("on_hold_date"):  parts.append(f"J={u['on_hold_date']}")
         if u.get("approved_date"): parts.append(f"K={u['approved_date']}")
         if u.get("paid_date"):     parts.append(f"L={u['paid_date']}")
         if u.get("status"):        parts.append(f"G={u['status']}")
-        print(f"  Row {u['row_index']:3d}  {', '.join(parts)}"
+        tab_label = (u.get("tab") or "").replace(" Line Items", "")
+        print(f"  [{tab_label:9s}] Row {u['row_index']:3d}  {', '.join(parts)}"
               f"  ← {row.get('sufs_reimb_id',''):14s}  {row.get('item','')[:40]}")
 
     print()

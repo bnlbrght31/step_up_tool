@@ -1,6 +1,7 @@
 """
 Downloads Amazon invoice PDFs via the existing CDP Chrome connection.
-Saves to ~/Desktop/SUFS/2025-2026/<order_number>.pdf
+Saves to ~/Desktop/SUFS/2026-2027/<order_number>.pdf
+(bump the folder each July when the scholarship year rolls over).
 """
 
 import asyncio
@@ -8,7 +9,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
-OUTPUT_DIR = Path.home() / "Desktop" / "SUFS" / "2025-2026"
+OUTPUT_DIR = Path.home() / "Desktop" / "SUFS" / "2026-2027"
 INVOICE_URL = "https://www.amazon.com/gp/css/summary/print.html?orderID={order_id}"
 
 
