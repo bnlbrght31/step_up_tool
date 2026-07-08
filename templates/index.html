@@ -4,108 +4,398 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SUFS Reimbursement Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --bg: #E7ECE5;
+      --surface: #FCFBF7;
+      --ink: #16261F;
+      --ink-2: #46574E;
+      --ink-3: #7C8B81;
+      --pine: #1E6A4C;
+      --pine-deep: #124F38;
+      --gold: #A9741D;
+      --rule: #D4DCD1;
+      --rule-strong: #C1CBBD;
+      --danger: #A6382F;
+      --danger-bg: #F3E1DD;
+      --ok: #276749;
+      --ok-bg: #D6E8D9;
+      --pend-bg: #F0E6CF;
+      --pend: #8A6412;
+      --shadow: 0 1px 2px rgba(22,38,31,.05), 0 12px 32px -14px rgba(22,38,31,.22);
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f9; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-    .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.1); padding: 40px; width: 100%; max-width: 500px; }
-    h1 { font-size: 1.5rem; color: #1a202c; margin-bottom: 6px; }
-    p.sub { color: #718096; font-size: .9rem; margin-bottom: 24px; }
-    .steps { background: #edf2f7; border-radius: 8px; padding: 16px 20px; margin-bottom: 24px; font-size: .85rem; color: #4a5568; line-height: 1.8; }
-    .steps ol { padding-left: 18px; }
-    .discover-section { border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
-    .discover-section h2 { font-size: .95rem; color: #2d3748; margin-bottom: 6px; }
-    .discover-section p { font-size: .82rem; color: #718096; margin-bottom: 10px; }
-    .discover-row { display: flex; gap: 8px; align-items: center; }
-    .discover-row input { flex: 1; padding: 7px 10px; border: 1px solid #cbd5e0; border-radius: 6px; font-size: .85rem; }
-    .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: .75rem; font-weight: 600; margin-left: 8px; }
-    .badge.done { background: #c6f6d5; color: #276749; }
-    .badge.pending { background: #fed7d7; color: #c53030; }
-    label.upload-label { display: block; border: 2px dashed #cbd5e0; border-radius: 8px; padding: 32px; text-align: center; cursor: pointer; transition: border-color .2s; }
-    label.upload-label:hover { border-color: #4299e1; }
-    label.upload-label input { display: none; }
-    label.upload-label span { display: block; color: #718096; font-size: .9rem; margin-top: 8px; }
-    #file-name { margin-top: 10px; font-size: .85rem; color: #4a5568; font-weight: 600; }
-    .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: .9rem; font-weight: 600; cursor: pointer; transition: background .2s; }
-    .btn-primary { background: #3182ce; color: #fff; }
-    .btn-primary:hover { background: #2b6cb0; }
-    .btn-primary:disabled { background: #a0aec0; cursor: not-allowed; }
-    .btn-block { display: block; width: 100%; margin-top: 16px; padding: 12px; font-size: 1rem; }
-    .btn-outline { background: #fff; border: 1px solid #cbd5e0; color: #4a5568; }
-    .btn-outline:hover { background: #f7fafc; }
-    .error { background: #fed7d7; color: #c53030; border-radius: 8px; padding: 12px 16px; font-size: .9rem; margin-bottom: 20px; }
-    #discover-status { margin-top: 8px; font-size: .82rem; }
-    #discover-status.ok { color: #276749; }
-    #discover-status.err { color: #c53030; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      background-image:
+        radial-gradient(1100px 520px at 82% -8%, rgba(30,106,76,.07), transparent 60%),
+        radial-gradient(760px 420px at -6% 108%, rgba(169,116,29,.06), transparent 60%);
+      min-height: 100vh;
+      line-height: 1.55;
+      padding: clamp(20px, 5vw, 56px) 18px 64px;
+      display: flex;
+      justify-content: center;
+      -webkit-font-smoothing: antialiased;
+    }
+    .ledger { width: 100%; max-width: 580px; }
+
+    /* --- Masthead ------------------------------------------------------- */
+    .eyebrow {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: .68rem; font-weight: 500;
+      letter-spacing: .16em; text-transform: uppercase;
+      color: var(--ink-3);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--rule-strong); }
+    .wordmark {
+      font-family: "Bricolage Grotesque", sans-serif;
+      font-weight: 800; font-size: clamp(2.1rem, 7vw, 2.9rem);
+      letter-spacing: -.03em; line-height: .98;
+      margin: 16px 0 12px;
+    }
+    .wordmark .amp { color: var(--pine); }
+    .tagline { color: var(--ink-2); font-size: .98rem; max-width: 44ch; }
+    .tagline b { color: var(--ink); font-weight: 600; }
+
+    .error {
+      margin-top: 22px;
+      background: var(--danger-bg); color: var(--danger);
+      border: 1px solid #E4C4BE; border-left: 3px solid var(--danger);
+      border-radius: 8px; padding: 12px 16px; font-size: .9rem;
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    /* --- Signature: receipt intake ------------------------------------- */
+    .intake {
+      position: relative;
+      margin-top: 30px;
+      background: var(--surface);
+      border: 1px solid var(--rule);
+      border-bottom: none;
+      border-radius: 14px 14px 0 0;
+      box-shadow: var(--shadow);
+      padding: 20px 22px 26px;
+    }
+    /* torn / toothed bottom edge — the receipt tell */
+    .intake::after {
+      content: "";
+      position: absolute; left: -1px; right: -1px; bottom: -13px; height: 14px;
+      background:
+        linear-gradient(-45deg, var(--surface) 9px, transparent 0) 0 0,
+        linear-gradient( 45deg, var(--surface) 9px, transparent 0) 0 0;
+      background-size: 17px 17px; background-repeat: repeat-x;
+      filter: drop-shadow(0 2px 1px rgba(22,38,31,.06));
+    }
+    .docket {
+      display: flex; align-items: center; justify-content: space-between;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: .7rem; letter-spacing: .13em; text-transform: uppercase;
+      color: var(--ink-2);
+      padding-bottom: 16px; margin-bottom: 18px;
+      border-bottom: 1px dashed var(--rule-strong);
+    }
+    .docket .no { color: var(--gold); font-weight: 600; letter-spacing: .1em; }
+
+    .dropzone {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      text-align: center; cursor: pointer;
+      border: 1.5px dashed var(--rule-strong);
+      border-radius: 10px; padding: 34px 20px;
+      background: #fff;
+      transition: border-color .18s ease, background .18s ease, transform .18s ease;
+    }
+    .dropzone:hover { border-color: var(--pine); background: #FAFCFA; }
+    .dropzone.dragging { border-color: var(--pine); border-style: solid; background: #F2F8F3; transform: translateY(-1px); }
+    .dropzone svg { color: var(--pine); margin-bottom: 8px; }
+    .dropzone input { display: none; }
+    .dz-title { font-family: "Bricolage Grotesque", sans-serif; font-weight: 700; font-size: 1.05rem; letter-spacing: -.01em; }
+    .dz-sub { color: var(--ink-3); font-size: .84rem; }
+    #file-name {
+      margin-top: 12px; font-family: "IBM Plex Mono", monospace; font-size: .82rem;
+      color: var(--pine-deep); font-weight: 500; text-align: center;
+      word-break: break-all; min-height: 1em;
+    }
+
+    .perforation {
+      display: flex; align-items: center; gap: 12px;
+      margin: 20px 0 4px; color: var(--ink-3);
+      font-family: "IBM Plex Mono", monospace; font-size: .64rem;
+      letter-spacing: .18em; text-transform: uppercase;
+    }
+    .perforation::before, .perforation::after {
+      content: ""; flex: 1;
+      border-top: 1.5px dashed var(--rule-strong);
+    }
+
+    /* --- Buttons -------------------------------------------------------- */
+    .btn {
+      font-family: "Inter", sans-serif; font-size: .92rem; font-weight: 600;
+      border: none; border-radius: 9px; cursor: pointer;
+      transition: background .18s ease, transform .12s ease, box-shadow .18s ease, border-color .18s ease;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary {
+      display: block; width: 100%; margin-top: 14px; padding: 13px;
+      background: var(--pine); color: #fff; font-size: .98rem;
+      box-shadow: 0 1px 0 rgba(255,255,255,.2) inset, 0 8px 20px -10px rgba(30,106,76,.7);
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--pine-deep); }
+    .btn-primary:disabled { background: #AFBDB3; cursor: not-allowed; box-shadow: none; }
+    .btn-ghost {
+      background: transparent; color: var(--pine-deep);
+      border: 1px solid var(--rule-strong); padding: 8px 14px; font-size: .84rem;
+      white-space: nowrap;
+    }
+    .btn-ghost:hover:not(:disabled) { border-color: var(--pine); background: #F3F7F3; }
+    .btn-ghost:disabled { color: var(--ink-3); cursor: not-allowed; opacity: .7; }
+
+    /* --- Section scaffolding ------------------------------------------- */
+    section.block { margin-top: 34px; }
+    .section-label {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: .68rem; font-weight: 500;
+      letter-spacing: .16em; text-transform: uppercase;
+      color: var(--ink-3); margin-bottom: 14px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .section-label::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+
+    /* --- Readiness / system check -------------------------------------- */
+    .check {
+      background: var(--surface); border: 1px solid var(--rule);
+      border-radius: 12px; box-shadow: var(--shadow); overflow: hidden;
+    }
+    .check-row { padding: 16px 18px; }
+    .check-row + .check-row { border-top: 1px solid var(--rule); }
+    .check-head { display: flex; align-items: center; gap: 10px; }
+    .check-name { font-weight: 600; font-size: .95rem; }
+    .badge {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: .68rem; font-weight: 600; letter-spacing: .04em;
+      padding: 3px 9px; border-radius: 6px; white-space: nowrap;
+    }
+    .badge.done { background: var(--ok-bg); color: var(--ok); }
+    .badge.pending { background: var(--pend-bg); color: var(--pend); }
+    .check-desc { color: var(--ink-2); font-size: .85rem; margin: 7px 0 12px; }
+    .check-action { display: flex; gap: 8px; align-items: center; }
+    .check-action input {
+      flex: 1; min-width: 0; padding: 8px 11px; font-size: .84rem;
+      font-family: "Inter", sans-serif;
+      border: 1px solid var(--rule-strong); border-radius: 8px; background: #fff;
+      color: var(--ink);
+    }
+    .check-action input::placeholder { color: var(--ink-3); }
+    .check-action input:focus { outline: none; border-color: var(--pine); box-shadow: 0 0 0 3px rgba(30,106,76,.12); }
+    .check-status { margin-top: 9px; font-size: .82rem; font-family: "IBM Plex Mono", monospace; min-height: 1em; color: var(--ink-2); }
+    #discover-status.ok, .check-status.ok { color: var(--ok); }
+    #discover-status.err, .check-status.err { color: var(--danger); }
+
+    /* --- Tools / ledger index ------------------------------------------ */
+    .tool {
+      display: flex; align-items: center; gap: 14px;
+      padding: 15px 18px; text-decoration: none; color: inherit;
+      background: var(--surface); border: 1px solid var(--rule);
+      border-radius: 12px; box-shadow: var(--shadow);
+      transition: border-color .16s ease, transform .16s ease;
+    }
+    .tool + .tool { margin-top: 10px; }
+    .tool:hover { border-color: var(--pine); transform: translateX(2px); }
+    .tool:focus-visible { outline: 2px solid var(--pine); outline-offset: 2px; }
+    .tool .glyph {
+      flex: none; width: 34px; height: 34px; border-radius: 8px;
+      display: grid; place-items: center;
+      background: #EEF3EC; color: var(--pine-deep); font-size: 1.05rem;
+    }
+    .tool-body { flex: 1; min-width: 0; }
+    .tool-name { font-weight: 600; font-size: .95rem; display: flex; align-items: baseline; gap: 8px; }
+    .tool-name .leader { flex: 1; border-bottom: 1.5px dotted var(--rule-strong); transform: translateY(-3px); }
+    .tool-sub { color: var(--ink-3); font-size: .8rem; margin-top: 1px; }
+    .tool .arrow { flex: none; color: var(--ink-3); transition: transform .16s ease, color .16s ease; font-family: "IBM Plex Mono", monospace; }
+    .tool:hover .arrow { color: var(--pine); transform: translateX(3px); }
+
+    /* --- First-time setup (demoted) ------------------------------------ */
+    details.setup {
+      margin-top: 30px; border: 1px solid var(--rule);
+      border-radius: 12px; background: transparent; overflow: hidden;
+    }
+    details.setup summary {
+      cursor: pointer; list-style: none; padding: 14px 18px;
+      font-size: .88rem; font-weight: 500; color: var(--ink-2);
+      display: flex; align-items: center; gap: 10px;
+    }
+    details.setup summary::-webkit-details-marker { display: none; }
+    details.setup summary::before {
+      content: "＋"; font-family: "IBM Plex Mono", monospace; color: var(--pine); font-weight: 600;
+    }
+    details.setup[open] summary::before { content: "－"; }
+    details.setup summary:hover { color: var(--ink); }
+    .setup-body { padding: 2px 20px 20px; font-size: .86rem; color: var(--ink-2); }
+    .setup-body ol { padding-left: 20px; line-height: 1.9; }
+    .setup-body code {
+      display: block; margin-top: 6px; padding: 9px 11px;
+      font-family: "IBM Plex Mono", monospace; font-size: .74rem;
+      background: #EEF2EC; border: 1px solid var(--rule); border-radius: 6px;
+      color: var(--ink); word-break: break-all;
+    }
+
+    .colophon {
+      margin-top: 34px; text-align: center;
+      font-family: "IBM Plex Mono", monospace; font-size: .68rem;
+      letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3);
+    }
+    .colophon b { color: var(--pine-deep); }
+
+    /* --- Motion --------------------------------------------------------- */
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    .reveal { opacity: 0; animation: rise .6s cubic-bezier(.2,.7,.2,1) forwards; }
+    .reveal.d1 { animation-delay: .05s; } .reveal.d2 { animation-delay: .13s; }
+    .reveal.d3 { animation-delay: .22s; } .reveal.d4 { animation-delay: .31s; }
+    .reveal.d5 { animation-delay: .40s; }
+
+    :focus-visible { outline: 2px solid var(--pine); outline-offset: 2px; border-radius: 4px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .reveal { opacity: 1; animation: none; }
+      * { transition: none !important; }
+    }
+    @media (max-width: 420px) {
+      .dropzone { padding: 26px 14px; }
+      .intake { padding: 18px 16px 22px; }
+      .check-action { flex-wrap: wrap; }
+      .check-action .btn-ghost { width: 100%; }
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>SUFS Reimbursement Agent</h1>
-    <p class="sub">Upload a receipt PDF and the agent will fill the form for you.</p>
-
-    <div class="steps">
-      <ol>
-        <li>Launch Chrome with remote debugging (Terminal):<br/>
-          <code style="font-size:.78rem;background:#dde;padding:3px 6px;border-radius:4px;display:block;margin-top:4px;word-break:break-all">/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.sufs-agent-chrome"</code>
-        </li>
-        <li>Log in to Step Up for Students in that Chrome window and open your reimbursement request</li>
-        <li>Upload your receipt on the SUFS site, then upload it below</li>
-        <li>Review extracted items and click <strong>Fill Form</strong></li>
-        <li>The agent fills the form — you submit</li>
-      </ol>
-    </div>
-
-    <!-- Dropdown Discovery -->
-    <div class="discover-section">
-      <h2>
-        Form Options
-        {% if options_discovered %}
-          <span class="badge done">✓ Discovered</span>
-        {% else %}
-          <span class="badge pending">Not yet discovered</span>
-        {% endif %}
-      </h2>
-      <p>Run this once with the SUFS form open in Chrome to map all dropdown options. This makes filling much more reliable.</p>
-      <div class="discover-row">
-        <input type="text" id="discover-url" placeholder="Form URL (optional if tab is already open)" />
-        <button class="btn btn-outline" onclick="discoverOptions()">Discover</button>
-      </div>
-      <div id="discover-status"></div>
-    </div>
-
-    <!-- Gmail Access -->
-    <div class="discover-section">
-      <h2>
-        Gmail Access
-        <span class="badge pending" id="gmail-badge">Checking…</span>
-      </h2>
-      <p id="gmail-desc">Used by the Amazon scanner and the SUFS status scans to read your email.</p>
-      <div class="discover-row">
-        <button class="btn btn-outline" id="gmail-auth-btn" onclick="authorizeGmail()">Re-authorize Gmail</button>
-      </div>
-      <div id="gmail-status" style="margin-top:8px;font-size:.82rem;"></div>
-    </div>
-
-    <a href="/scan" class="btn btn-outline btn-block" style="text-align:center;text-decoration:none;display:block;margin-bottom:10px;">🔍 Scan Amazon Orders</a>
-    <a href="/sufs-scan/main" class="btn btn-outline btn-block" style="text-align:center;text-decoration:none;display:block;margin-bottom:10px;">📬 Scan SUFS Statuses — Main tab</a>
-    <a href="/sufs-scan/testing" class="btn btn-outline btn-block" style="text-align:center;text-decoration:none;display:block;margin-bottom:16px;">📬 Scan SUFS Statuses — Line Items</a>
+  <main class="ledger">
+    <header class="masthead">
+      <p class="eyebrow reveal d1">Step Up for Students · Reimbursement Ledger</p>
+      <h1 class="wordmark reveal d1">Reimbursement<br>Agent</h1>
+      <p class="tagline reveal d2">Drop in a receipt — it reads the line items and fills your SUFS form. <b>You always submit.</b></p>
+    </header>
 
     {% if error %}
-    <div class="error">{{ error }}</div>
+    <div class="error reveal d2">{{ error }}</div>
     {% endif %}
 
-    <form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
-      <label class="upload-label" for="receipt-input">
-        <svg width="40" height="40" fill="none" stroke="#a0aec0" stroke-width="1.5" viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span>Click to select a receipt PDF</span>
-        <input type="file" id="receipt-input" name="receipt" accept=".pdf" required />
-      </label>
-      <div id="file-name"></div>
-      <button class="btn btn-primary btn-block" type="submit" id="submit-btn" disabled>Parse Receipt</button>
-    </form>
-  </div>
+    <!-- Signature: receipt intake -->
+    <section class="intake reveal d3">
+      <div class="docket">
+        <span>Receipt intake</span>
+        <span class="no">FY 2026–2027</span>
+      </div>
+      <form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
+        <label class="dropzone" for="receipt-input" id="dropzone">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 2.5h9l3 3V21l-2-1-2 1-2-1-2 1-2-1-2 1V2.5z"/>
+            <path d="M9 8h6M9 11.5h6M9 15h4"/>
+          </svg>
+          <span class="dz-title">Drop a receipt PDF</span>
+          <span class="dz-sub">or click to choose a file</span>
+          <input type="file" id="receipt-input" name="receipt" accept=".pdf" required />
+        </label>
+        <div id="file-name"></div>
+        <div class="perforation">tear here</div>
+        <button class="btn btn-primary" type="submit" id="submit-btn" disabled>Parse receipt</button>
+      </form>
+    </section>
+
+    <!-- Readiness / system check -->
+    <section class="block reveal d4">
+      <p class="section-label">System check</p>
+      <div class="check">
+        <div class="check-row">
+          <div class="check-head">
+            <span class="check-name">Form options</span>
+            {% if options_discovered %}
+              <span class="badge done">✓ mapped</span>
+            {% else %}
+              <span class="badge pending">not mapped</span>
+            {% endif %}
+          </div>
+          <p class="check-desc">Read the SUFS dropdowns once so the agent fills categories reliably. Run it with the form open in Chrome.</p>
+          <div class="check-action">
+            <input type="text" id="discover-url" placeholder="Form URL (optional if the tab is open)" />
+            <button class="btn btn-ghost" onclick="discoverOptions()">Map options</button>
+          </div>
+          <div id="discover-status" class="check-status"></div>
+        </div>
+
+        <div class="check-row">
+          <div class="check-head">
+            <span class="check-name">Gmail access</span>
+            <span class="badge pending" id="gmail-badge">Checking…</span>
+          </div>
+          <p class="check-desc" id="gmail-desc">Lets the Amazon and status scanners read your email. Read-only.</p>
+          <div class="check-action">
+            <button class="btn btn-ghost" id="gmail-auth-btn" onclick="authorizeGmail()">Re-authorize Gmail</button>
+          </div>
+          <div id="gmail-status" class="check-status"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tools / ledger index -->
+    <section class="block reveal d4">
+      <p class="section-label">Scanners</p>
+      <a href="/scan" class="tool">
+        <span class="glyph">🔍</span>
+        <span class="tool-body">
+          <span class="tool-name">Scan Amazon orders <span class="leader"></span></span>
+          <span class="tool-sub">Find eligible purchases and stage them in Unsubmitted</span>
+        </span>
+        <span class="arrow">→</span>
+      </a>
+      <a href="/sufs-scan/testing" class="tool">
+        <span class="glyph">📬</span>
+        <span class="tool-body">
+          <span class="tool-name">SUFS statuses — Line Items <span class="leader"></span></span>
+          <span class="tool-sub">Write approval, hold &amp; payment dates back to your sheet</span>
+        </span>
+        <span class="arrow">→</span>
+      </a>
+      <a href="/sufs-scan/main" class="tool">
+        <span class="glyph">📬</span>
+        <span class="tool-body">
+          <span class="tool-name">SUFS statuses — Main tab <span class="leader"></span></span>
+          <span class="tool-sub">Approve &amp; paid dates for the legacy main tab</span>
+        </span>
+        <span class="arrow">→</span>
+      </a>
+    </section>
+
+    <!-- First-time setup, demoted -->
+    <details class="setup reveal d5">
+      <summary>First-time setup — launch Chrome for the agent</summary>
+      <div class="setup-body">
+        <ol>
+          <li>Launch Chrome with remote debugging (Terminal):
+            <code>/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.sufs-agent-chrome"</code>
+          </li>
+          <li>Log in to Step Up for Students in that window and open your reimbursement request</li>
+          <li>Upload your receipt on the SUFS site, then drop it in above</li>
+          <li>Review the extracted items and click <strong>Fill Form</strong></li>
+          <li>The agent fills the form — you review and submit</li>
+        </ol>
+      </div>
+    </details>
+
+    <p class="colophon reveal d5">Never submits for you · logs to <b>2026–2027 Line Items</b></p>
+  </main>
 
   <script>
+    // Dropzone label + drag affordance
+    const dropzone = document.getElementById('dropzone');
+    ['dragover','dragenter'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('dragging'); }));
+    ['dragleave','dragend','drop'].forEach(ev => dropzone.addEventListener(ev, () => dropzone.classList.remove('dragging')));
+
     const input = document.getElementById('receipt-input');
     const fileLabel = document.getElementById('file-name');
     const btn = document.getElementById('submit-btn');
@@ -130,28 +420,27 @@
         const res = await fetch('/gmail/status');
         const d = await res.json();
         if (d.state === 'authorized') {
-          setBadge('✓ Authorized', true);
-          gmailStatus.className = 'ok';
-          gmailStatus.style.color = '#276749';
+          setBadge('✓ authorized', true);
+          gmailStatus.className = 'check-status ok';
           gmailStatus.textContent = d.email ? ('Signed in as ' + d.email) : 'Signed in.';
           gmailBtn.textContent = 'Re-authorize Gmail';
         } else if (d.state === 'no_creds') {
-          setBadge('No client secrets', false);
-          gmailStatus.style.color = '#c53030';
+          setBadge('no client secrets', false);
+          gmailStatus.className = 'check-status err';
           gmailStatus.textContent = 'gmail_oauth_credentials.json is missing — can’t authorize.';
           gmailBtn.disabled = true;
         } else {
           // expired / missing / error
-          setBadge(d.state === 'missing' ? 'Not authorized' : 'Needs sign-in', false);
-          gmailStatus.style.color = '#c53030';
+          setBadge(d.state === 'missing' ? 'not authorized' : 'needs sign-in', false);
+          gmailStatus.className = 'check-status err';
           gmailStatus.textContent = d.state === 'missing'
-            ? 'Not authorized yet — click below to sign in.'
-            : 'Token expired or revoked — click below to re-authorize.';
+            ? 'Not authorized yet — sign in to enable scanning.'
+            : 'Token expired or revoked — re-authorize to continue.';
           gmailBtn.textContent = d.state === 'missing' ? 'Authorize Gmail' : 'Re-authorize Gmail';
         }
       } catch (e) {
-        setBadge('Unknown', false);
-        gmailStatus.style.color = '#c53030';
+        setBadge('unknown', false);
+        gmailStatus.className = 'check-status err';
         gmailStatus.textContent = 'Could not check status: ' + e.message;
       }
     }
@@ -160,21 +449,21 @@
       gmailBtn.disabled = true;
       const original = gmailBtn.textContent;
       gmailBtn.textContent = 'Waiting for browser…';
-      gmailStatus.style.color = '#4a5568';
+      gmailStatus.className = 'check-status';
       gmailStatus.textContent = 'A Google sign-in tab should open. Approve access there, then come back.';
       try {
         const res = await fetch('/gmail/auth', { method: 'POST' });
         const d = await res.json();
         if (d.success) {
-          gmailStatus.style.color = '#276749';
+          gmailStatus.className = 'check-status ok';
           gmailStatus.textContent = '✓ Authorized' + (d.email ? ' as ' + d.email : '') + '.';
-          setBadge('✓ Authorized', true);
+          setBadge('✓ authorized', true);
         } else {
-          gmailStatus.style.color = '#c53030';
+          gmailStatus.className = 'check-status err';
           gmailStatus.textContent = 'Error: ' + (d.error || 'authorization failed');
         }
       } catch (e) {
-        gmailStatus.style.color = '#c53030';
+        gmailStatus.className = 'check-status err';
         gmailStatus.textContent = 'Network error: ' + e.message;
       } finally {
         gmailBtn.disabled = false;
@@ -188,7 +477,7 @@
     async function discoverOptions() {
       const status = document.getElementById('discover-status');
       const url = document.getElementById('discover-url').value.trim();
-      status.className = ''; status.textContent = 'Connecting to Chrome and reading dropdowns…';
+      status.className = 'check-status'; status.textContent = 'Connecting to Chrome and reading dropdowns…';
       try {
         const res = await fetch('/discover', {
           method: 'POST',
@@ -197,14 +486,14 @@
         });
         const data = await res.json();
         if (data.success) {
-          status.className = 'ok';
+          status.className = 'check-status ok';
           const cats = data.options.categories.length;
-          status.textContent = `✓ Done — ${cats} categories mapped. Reload to update badge.`;
+          status.textContent = `✓ Done — ${cats} categories mapped. Reload to update the badge.`;
         } else {
-          status.className = 'err'; status.textContent = 'Error: ' + data.error;
+          status.className = 'check-status err'; status.textContent = 'Error: ' + data.error;
         }
       } catch (e) {
-        status.className = 'err'; status.textContent = 'Network error: ' + e.message;
+        status.className = 'check-status err'; status.textContent = 'Network error: ' + e.message;
       }
     }
   </script>

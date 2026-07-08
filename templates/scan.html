@@ -4,99 +4,73 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Amazon Order Scanner — SUFS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ledger.css') }}">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f9; min-height: 100vh; padding: 32px 16px; }
-    .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.1); padding: 32px; max-width: 960px; margin: 0 auto; }
-    h1 { font-size: 1.4rem; color: #1a202c; margin-bottom: 4px; }
-    p.sub { color: #718096; font-size: .9rem; margin-bottom: 24px; }
-    .info-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
-    .info-row .badge { padding: 4px 12px; border-radius: 20px; font-size: .8rem; font-weight: 600; background: #ebf8ff; color: #2b6cb0; }
-    .btn { padding: 9px 18px; border: none; border-radius: 8px; font-size: .88rem; font-weight: 600; cursor: pointer; transition: background .15s; }
-    .btn-primary { background: #3182ce; color: #fff; }
-    .btn-primary:hover { background: #2b6cb0; }
-    .btn-primary:disabled { background: #a0aec0; cursor: not-allowed; }
-    .btn-success { background: #38a169; color: #fff; }
-    .btn-success:hover { background: #2f855a; }
-    .btn-success:disabled { background: #a0aec0; cursor: not-allowed; }
-    .btn-outline { background: #fff; border: 1px solid #cbd5e0; color: #4a5568; }
-    .btn-outline:hover { background: #f7fafc; }
-    .btn-sm { padding: 5px 12px; font-size: .8rem; }
-    .status-bar { padding: 10px 14px; border-radius: 8px; font-size: .88rem; margin-bottom: 16px; display: none; }
-    .status-bar.info { background: #ebf8ff; color: #2b6cb0; display: block; }
-    .status-bar.ok { background: #c6f6d5; color: #276749; display: block; }
-    .status-bar.err { background: #fed7d7; color: #c53030; display: block; }
-    .action-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
-    .select-all-row { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; font-size: .85rem; color: #4a5568; }
-    table { width: 100%; border-collapse: collapse; font-size: .85rem; }
-    thead th { background: #edf2f7; padding: 10px 12px; text-align: left; font-weight: 600; color: #4a5568; border-bottom: 2px solid #e2e8f0; }
-    thead th:nth-child(4), td:nth-child(4) { min-width: 260px; word-break: break-word; }
-    tbody tr { border-bottom: 1px solid #e2e8f0; }
-    tbody tr:hover { background: #f7fafc; }
-    tbody tr.in-sheet { opacity: .5; }
-    td { padding: 9px 12px; vertical-align: middle; }
-    td.check-col { width: 36px; text-align: center; }
-    .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: .75rem; font-weight: 600; }
-    .tag-eligible { background: #c6f6d5; color: #276749; }
-    .tag-unknown { background: #e2e8f0; color: #718096; }
-    .tag-sheet { background: #e9d8fd; color: #553c9a; }
-    .tag-returned { background: #fed7d7; color: #c53030; cursor: help; }
-    .tag-partial { background: #fefcbf; color: #744210; cursor: help; }
-    .empty-state { text-align: center; padding: 48px 24px; color: #a0aec0; }
-    .empty-state p { margin-top: 8px; font-size: .9rem; }
-    a.back { display: inline-block; margin-bottom: 20px; color: #3182ce; font-size: .88rem; text-decoration: none; }
-    a.back:hover { text-decoration: underline; }
+    .info-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+    .info-row .note { font-family: var(--mono); font-size: .72rem; color: var(--ink-3); letter-spacing: .04em; }
+    .action-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 20px; }
+    .select-all-row { display: flex; gap: 14px; align-items: center; margin: 16px 0 4px; flex-wrap: wrap; }
     #results-section { display: none; }
-    .summary { font-size: .85rem; color: #4a5568; margin-bottom: 8px; }
-    .summary strong { color: #2d3748; }
+    .table-wrap { overflow-x: auto; margin-top: 8px; }
+    thead th:nth-child(4), td:nth-child(4) { min-width: 260px; word-break: break-word; }
+    td.check-col { width: 36px; text-align: center; }
+    td.ordno { font-family: var(--mono); font-size: .8rem; color: var(--ink-2); }
+    tbody tr.in-sheet { opacity: .5; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <a class="back" href="/">← Back to Receipt Agent</a>
-    <h1>Amazon Order Scanner</h1>
-    <p class="sub">Scan Gmail for Amazon orders, flag SUFS-eligible items, and log them to your tracking sheet.</p>
+  <div class="shell" style="max-width:980px">
+    <a class="back" href="/">← Back to intake</a>
+    <p class="eyebrow" style="margin-top:18px">Step Up for Students · Amazon Scanner</p>
+    <h1 class="title">Amazon Order Scanner</h1>
+    <p class="sub">Scan Gmail for Amazon orders, flag SUFS-eligible items, and stage them in your <b>Unsubmitted</b> tab.</p>
 
-    <div class="info-row">
-      <label style="font-size:.85rem;color:#4a5568;display:flex;align-items:center;gap:8px;">
-        Scan from:
-        <input type="date" id="scan-from-date" style="padding:4px 8px;border:1px solid #cbd5e0;border-radius:6px;font-size:.85rem;" />
-      </label>
-      <span style="font-size:.8rem;color:#a0aec0;">defaults to last scan date or 07/01/2025</span>
-    </div>
-
-    <div id="status-bar" class="status-bar"></div>
-
-    <div class="action-row">
-      <button class="btn btn-primary" id="scan-btn" onclick="runScan()">Scan Gmail</button>
-      <button class="btn btn-success" id="log-pdf-btn" onclick="logAndDownload()" disabled>Log to Sheet + Download PDFs</button>
-      <button class="btn btn-outline" id="log-btn" onclick="logSelected()" disabled>Log to Sheet Only</button>
-    </div>
-
-    <div id="results-section">
-      <div class="summary" id="summary-text"></div>
-      <div class="select-all-row">
-        <label><input type="checkbox" id="select-eligible" onchange="selectEligible(this.checked)" /> Select all eligible (not yet in sheet)</label>
-        <label><input type="checkbox" id="select-all" onchange="selectAll(this.checked)" /> Select all</label>
-        <button class="btn btn-sm btn-outline" id="filter-eligible-btn" onclick="toggleEligibleFilter()" style="display:none;margin-left:auto">Show Eligible Only</button>
+    <div class="card" style="margin-top:24px">
+      <div class="info-row">
+        <label>Scan from:
+          <input type="date" id="scan-from-date" />
+        </label>
+        <span class="note">defaults to last scan date, or 07/01/2026</span>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th class="check-col"></th>
-            <th>Date</th>
-            <th>Order #</th>
-            <th>Description</th>
-            <th>Total</th>
-            <th>SUFS Category</th>
-          </tr>
-        </thead>
-        <tbody id="orders-table"></tbody>
-      </table>
-    </div>
 
-    <div class="empty-state" id="empty-state" style="display:none">
-      <p>No new Amazon orders found since the last scan date.</p>
+      <div id="status-bar" class="status-bar"></div>
+
+      <div class="action-row">
+        <button class="btn btn-primary" id="scan-btn" onclick="runScan()">Scan Gmail</button>
+        <button class="btn btn-success" id="log-pdf-btn" onclick="logAndDownload()" disabled>Log to sheet + download PDFs</button>
+        <button class="btn btn-outline" id="log-btn" onclick="logSelected()" disabled>Log to sheet only</button>
+      </div>
+
+      <div id="results-section">
+        <div class="summary" id="summary-text"></div>
+        <div class="select-all-row">
+          <label><input type="checkbox" id="select-eligible" onchange="selectEligible(this.checked)" /> Select all eligible (not yet in sheet)</label>
+          <label><input type="checkbox" id="select-all" onchange="selectAll(this.checked)" /> Select all</label>
+          <button class="btn btn-sm btn-outline" id="filter-eligible-btn" onclick="toggleEligibleFilter()" style="display:none;margin-left:auto">Show eligible only</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="check-col"></th>
+                <th>Date</th>
+                <th>Order #</th>
+                <th>Description</th>
+                <th>Total</th>
+                <th>SUFS Category</th>
+              </tr>
+            </thead>
+            <tbody id="orders-table"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="empty-state" id="empty-state" style="display:none">
+        <p>No new Amazon orders found since the last scan date.</p>
+      </div>
     </div>
   </div>
 
@@ -154,7 +128,7 @@
         `Found <strong>${orders.length}</strong> orders — ` +
         `<strong>${newCount}</strong> not yet in sheet, ` +
         `<strong>${eligibleCount}</strong> likely eligible` +
-        `<span style="color:#a0aec0;font-weight:400">${costStr}</span>.`;
+        `<span style="color:#7C8B81;font-weight:400">${costStr}</span>.`;
 
       orders.forEach((o, i) => {
         const tr = document.createElement('tr');
@@ -188,7 +162,7 @@
               ${o.in_sheet ? 'disabled' : ''} />
           </td>
           <td>${o.purchase_date || '—'}</td>
-          <td style="font-family:monospace;font-size:.8rem">${o.order_number}</td>
+          <td class="ordno">${o.order_number}</td>
           <td>${o.description} ${sheetTag} ${returnTag}</td>
           <td>$${o.total || '—'}</td>
           <td>${categoryTag}</td>
@@ -201,8 +175,8 @@
       document.getElementById('log-btn').disabled = false;
       const filterBtn = document.getElementById('filter-eligible-btn');
       filterBtn.style.display = '';
-      filterBtn.textContent = showEligibleOnly ? 'Show All' : 'Show Eligible Only';
-      filterBtn.style.background = showEligibleOnly ? '#3182ce' : '';
+      filterBtn.textContent = showEligibleOnly ? 'Show all' : 'Show eligible only';
+      filterBtn.style.background = showEligibleOnly ? '#1E6A4C' : '';
       filterBtn.style.color = showEligibleOnly ? '#fff' : '';
       setStatus('ok', `Scan complete — ${orders.length} order(s) found.`);
     }
@@ -230,8 +204,8 @@
     function toggleEligibleFilter() {
       showEligibleOnly = !showEligibleOnly;
       const btn = document.getElementById('filter-eligible-btn');
-      btn.textContent = showEligibleOnly ? 'Show All' : 'Show Eligible Only';
-      btn.style.background = showEligibleOnly ? '#3182ce' : '';
+      btn.textContent = showEligibleOnly ? 'Show all' : 'Show eligible only';
+      btn.style.background = showEligibleOnly ? '#1E6A4C' : '';
       btn.style.color = showEligibleOnly ? '#fff' : '';
       document.querySelectorAll('#orders-table tr').forEach(tr => {
         tr.style.display = (showEligibleOnly && (tr.dataset.eligible === 'false' || tr.dataset.insheet === 'true')) ? 'none' : '';
@@ -281,7 +255,7 @@
       if (skipped.length) {
         const note = document.createElement('div');
         note.id = 'pdf-skip-note';
-        note.style.cssText = 'margin-top:10px;font-size:.82rem;color:#718096;';
+        note.style.cssText = 'margin-top:10px;font-size:.82rem;color:#7C8B81;';
         note.innerHTML = '<strong>Skipped (PDF already exists):</strong><br>' +
           skipped.map(([id]) => `&nbsp;&nbsp;${id}.pdf`).join('<br>');
         document.getElementById('status-bar').after(note);
@@ -329,7 +303,7 @@
       } finally {
         btn.disabled = false;
         document.getElementById('log-pdf-btn').disabled = false;
-        btn.textContent = 'Log to Sheet Only';
+        btn.textContent = 'Log to sheet only';
       }
     }
 

@@ -4,61 +4,61 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Confirm Items — SUFS Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ledger.css') }}">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f9; padding: 32px 16px; }
-    .page-header { max-width: 900px; margin: 0 auto 24px; }
-    h1 { font-size: 1.4rem; color: #1a202c; margin-bottom: 6px; }
-    p.sub { color: #718096; font-size: .9rem; }
-    .url-row { max-width: 900px; margin: 0 auto 20px; display: flex; gap: 10px; align-items: center; }
-    .url-row label { font-size: .85rem; font-weight: 600; color: #4a5568; white-space: nowrap; }
-    .url-row input { flex: 1; padding: 8px 12px; border: 1px solid #cbd5e0; border-radius: 6px; font-size: .9rem; }
-    .warning-banner { max-width: 900px; margin: 0 auto 20px; background: #fef3cd; border: 1px solid #f6c23e; border-radius: 8px; padding: 12px 16px; font-size: .88rem; color: #744210; }
-    .recon-banner { max-width: 900px; margin: 0 auto 20px; border-radius: 8px; padding: 12px 16px; font-size: .88rem; }
-    .recon-banner.ok { background: #c6f6d5; color: #276749; border: 1px solid #9ae6b4; }
-    .recon-banner.warn { background: #fed7d7; color: #c53030; border: 1px solid #fc8181; }
-    .conf-badge { display: inline-block; font-size: .58rem; font-weight: 700; text-transform: uppercase; padding: 1px 6px; border-radius: 10px; margin-left: 6px; vertical-align: middle; cursor: help; }
-    .conf-badge.low { background: #fed7d7; color: #c53030; }
-    .conf-badge.medium { background: #feebc8; color: #b7791f; }
-    .item-card { background: #fff; border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.08); padding: 20px 24px; margin: 0 auto 16px; max-width: 900px; }
+    .parse-cost { margin-top: 8px; font-family: var(--mono); font-size: .72rem; letter-spacing: .05em; color: var(--ink-3); }
+    .url-row { display: flex; gap: 10px; align-items: center; margin: 20px 0; flex-wrap: wrap; }
+    .url-row label { font-size: .85rem; font-weight: 500; color: var(--ink-2); }
+    .url-row input { flex: 1; min-width: 240px; }
+
+    .stack > * + * { margin-top: 16px; }
+    .item-card {
+      background: var(--surface); border: 1px solid var(--rule);
+      border-radius: 12px; box-shadow: var(--shadow-sm); padding: 20px 22px;
+      transition: opacity .18s ease;
+    }
     .item-card.excluded { opacity: .45; }
-    .item-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
-    .item-header input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; accent-color: #3182ce; }
-    .item-number { font-weight: 700; color: #2d3748; font-size: 1rem; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
-    .field label { display: block; font-size: .75rem; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
-    .field input, .field select { width: 100%; padding: 7px 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: .88rem; background: #f7fafc; }
-    .field input:focus, .field select:focus { outline: none; border-color: #4299e1; background: #fff; }
-    .actions { max-width: 900px; margin: 32px auto 0; display: flex; gap: 14px; justify-content: flex-end; }
-    .btn { padding: 11px 28px; border: none; border-radius: 8px; font-size: .95rem; font-weight: 600; cursor: pointer; transition: background .15s; }
-    .btn-primary { background: #3182ce; color: #fff; }
-    .btn-primary:hover { background: #2b6cb0; }
-    .btn-secondary { background: #edf2f7; color: #2d3748; }
-    .btn-secondary:hover { background: #e2e8f0; }
-    #status { max-width: 900px; margin: 16px auto 0; padding: 12px 16px; border-radius: 8px; font-size: .9rem; display: none; }
-    #status.success { background: #c6f6d5; color: #276749; }
-    #status.error { background: #fed7d7; color: #c53030; }
-    #status.loading { background: #bee3f8; color: #2a4365; }
-    #log-panel { max-width: 900px; margin: 24px auto 0; background: #fff; border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.08); padding: 24px; display: none; }
-    #log-panel h2 { font-size: 1.1rem; color: #2d3748; margin-bottom: 6px; }
-    #log-panel p.sub { color: #718096; font-size: .88rem; margin-bottom: 18px; }
+    .item-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .item-number {
+      font-family: var(--mono); font-size: .74rem; font-weight: 600;
+      letter-spacing: .12em; text-transform: uppercase; color: var(--pine-deep);
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+    .field label {
+      display: block; font-family: var(--mono); font-size: .64rem; font-weight: 500;
+      color: var(--ink-3); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 5px;
+    }
+    .field input, .field select { width: 100%; }
+
+    .actions { display: flex; gap: 14px; justify-content: flex-end; margin-top: 28px; flex-wrap: wrap; }
+    .actions .btn { padding: 11px 26px; font-size: .95rem; }
+
+    #status { margin-top: 18px; padding: 12px 16px; border-radius: 9px; font-size: .9rem; display: none; }
+    #status.success { background: var(--ok-bg); color: var(--ok); }
+    #status.error { background: var(--danger-bg); color: var(--danger); }
+    #status.loading { background: var(--info-bg); color: var(--pine-deep); }
+
+    #verify-panel { margin-top: 20px; padding: 22px 24px; display: none; }
+    #verify-panel h2, #log-panel h2 { font-family: var(--display); font-weight: 700; font-size: 1.15rem; letter-spacing: -.01em; margin-bottom: 4px; }
+    #verify-panel .vitem { margin-top: 16px; }
+    #verify-panel .vitem strong { font-size: .9rem; }
+    #verify-panel .table-wrap { overflow-x: auto; margin-top: 6px; }
+    #verify-panel tr.vwarn td { background: var(--danger-bg); color: var(--danger); font-weight: 600; }
+    #verify-panel .vok { color: var(--pine); }
+
+    #log-panel { margin-top: 24px; padding: 24px; display: none; }
+    #log-panel p.sub { margin-bottom: 18px; }
     .log-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
-    .log-fields label { display: block; font-size: .75rem; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
-    .log-fields input { width: 100%; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: .9rem; background: #f7fafc; }
-    .log-fields input:focus { outline: none; border-color: #4299e1; background: #fff; }
-    #log-status { margin-top: 12px; padding: 10px 14px; border-radius: 6px; font-size: .88rem; display: none; }
-    #log-status.success { background: #c6f6d5; color: #276749; }
-    #log-status.error { background: #fed7d7; color: #c53030; }
-    #verify-panel { max-width: 900px; margin: 20px auto 0; background: #fff; border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.08); padding: 22px 24px; display: none; }
-    #verify-panel h2 { font-size: 1.1rem; color: #2d3748; margin-bottom: 4px; }
-    #verify-panel p.sub { color: #718096; font-size: .85rem; margin-bottom: 14px; }
-    #verify-panel .vitem { margin-top: 14px; }
-    #verify-panel .vitem strong { font-size: .9rem; color: #2d3748; }
-    #verify-panel table { width: 100%; border-collapse: collapse; font-size: .82rem; margin-top: 6px; }
-    #verify-panel th, #verify-panel td { text-align: left; padding: 5px 9px; border-bottom: 1px solid #edf2f7; }
-    #verify-panel th { color: #a0aec0; font-weight: 600; font-size: .72rem; text-transform: uppercase; }
-    #verify-panel tr.vwarn td { background: #fff5f5; color: #c53030; font-weight: 600; }
-    #verify-panel .vok { color: #38a169; }
+    .log-fields label { display: block; font-family: var(--mono); font-size: .64rem; font-weight: 500; color: var(--ink-3); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 5px; }
+    .log-fields input { width: 100%; }
+    #log-status { margin-top: 14px; padding: 10px 14px; border-radius: 8px; font-size: .88rem; display: none; }
+    #log-status.success { background: var(--ok-bg); color: var(--ok); }
+    #log-status.error { background: var(--danger-bg); color: var(--danger); }
+
+    @media (max-width: 480px) { .log-fields { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -68,112 +68,114 @@
   const RECON = {{ (reconciliation or {}) | tojson }};
 </script>
 
-<div class="page-header">
-  <h1>Review Extracted Items</h1>
-  <p class="sub">Edit any fields, uncheck items to skip, then click <strong>Fill Form</strong>. The agent will never submit.</p>
+<div class="shell">
+  <a class="back" href="/">← Start over</a>
+  <p class="eyebrow" style="margin-top:18px">Step Up for Students · Receipt Review</p>
+  <h1 class="title">Review extracted items</h1>
+  <p class="sub">Edit any field, uncheck items to skip, then click <b>Fill form</b>. The agent never submits.</p>
   {% if parse_cost %}
-  <p style="margin-top:6px;font-size:.8rem;color:#a0aec0;">API cost for this parse: {{ parse_cost }}</p>
+  <p class="parse-cost">Parse cost · {{ parse_cost }}</p>
   {% endif %}
-</div>
 
-<div class="warning-banner">
-  ⚠ Make sure Chrome is running with remote debugging enabled and the SUFS form is open before clicking Fill Form.
-</div>
-
-{% if reconciliation and reconciliation.has_totals %}
-<div class="recon-banner {{ 'ok' if reconciliation.total_ok else 'warn' }}" id="recon-banner">Checking totals…</div>
-{% endif %}
-
-<div class="url-row">
-  <label for="form-url">Form URL (optional — used if no SUFS tab is already open):</label>
-  <input type="text" id="form-url" placeholder="https://apply.stepupforstudents.org/SubmitReimbursement/..." />
-</div>
-
-<div id="items-container">
-  {% for item in items %}
-  {% set m = matches[loop.index0] if matches else None %}
-  <div class="item-card" id="card-{{ loop.index0 }}" data-index="{{ loop.index0 }}">
-    <div class="item-header">
-      <input type="checkbox" id="include-{{ loop.index0 }}" checked onchange="toggleCard({{ loop.index0 }})" />
-      <span class="item-number">Item {{ loop.index }}</span>
-    </div>
-    <div class="grid">
-
-      <div class="field">
-        <label>Purchase Date</label>
-        <input type="text" data-field="purchase_date" value="{{ item.purchase_date or '' }}" placeholder="MM/DD/YYYY" />
-      </div>
-
-      <div class="field">
-        <label>Category{% if m and m.category.confidence in ['low','medium'] %} <span class="conf-badge {{ m.category.confidence }}" title="Auto-matched from &quot;{{ m.category.raw }}&quot; — please verify">{{ m.category.confidence }}</span>{% endif %}</label>
-        <select data-field="category" onchange="onCategoryChange({{ loop.index0 }}, this.value)" id="cat-{{ loop.index0 }}">
-          <option value="{{ (m.category.value if m else item.category) or '' }}">{{ (m.category.value if m else item.category) or '— loading —' }}</option>
-        </select>
-      </div>
-
-      <div class="field">
-        <label>Type{% if m and m.type.confidence in ['low','medium'] %} <span class="conf-badge {{ m.type.confidence }}" title="Auto-matched from &quot;{{ m.type.raw }}&quot; — please verify">{{ m.type.confidence }}</span>{% endif %}</label>
-        <select data-field="type" onchange="onTypeChange({{ loop.index0 }}, this.value)" id="type-{{ loop.index0 }}">
-          <option value="{{ (m.type.value if m else item.type) or '' }}">{{ (m.type.value if m else item.type) or '— loading —' }}</option>
-        </select>
-      </div>
-
-      <div class="field">
-        <label>Description{% if m and m.description.confidence in ['low','medium'] %} <span class="conf-badge {{ m.description.confidence }}" title="Auto-matched from &quot;{{ m.description.raw }}&quot; — please verify">{{ m.description.confidence }}</span>{% endif %}</label>
-        <select data-field="description" id="desc-{{ loop.index0 }}">
-          <option value="{{ (m.description.value if m else item.description) or '' }}">{{ (m.description.value if m else item.description) or '— loading —' }}</option>
-        </select>
-      </div>
-
-      <div class="field">
-        <label>Quantity</label>
-        <input type="number" data-field="quantity" value="{{ item.quantity or '' }}" min="0" step="1" />
-      </div>
-
-      <div class="field">
-        <label>Cost ($)</label>
-        <input type="number" data-field="cost" value="{{ item.cost or '' }}" min="0" step="0.01" />
-      </div>
-
-      <div class="field">
-        <label>Tax ($)</label>
-        <input type="number" data-field="tax" value="{{ item.tax or '' }}" min="0" step="0.01" />
-      </div>
-
-      <div class="field">
-        <label>Vendor{% if m and m.vendor.confidence in ['low','medium'] %} <span class="conf-badge {{ m.vendor.confidence }}" title="Auto-matched from &quot;{{ m.vendor.raw }}&quot; — please verify">{{ m.vendor.confidence }}</span>{% endif %}</label>
-        <select data-field="vendor" id="vendor-{{ loop.index0 }}">
-          <option value="{{ (m.vendor.value if m else item.vendor) or '' }}">{{ (m.vendor.value if m else item.vendor) or '— loading —' }}</option>
-        </select>
-      </div>
-
-    </div>
+  <div class="warning-banner" style="margin-top:20px">
+    Make sure Chrome is running with remote debugging and the SUFS form is open before you fill.
   </div>
-  {% endfor %}
-</div>
 
-<div class="actions">
-  <a href="/" class="btn btn-secondary">← Start Over</a>
-  <button class="btn btn-primary" onclick="submitItems()">Fill Form</button>
-</div>
-<div id="status"></div>
-<div id="verify-panel"></div>
+  {% if reconciliation and reconciliation.has_totals %}
+  <div class="recon-banner {{ 'ok' if reconciliation.total_ok else 'warn' }}" id="recon-banner" style="margin-top:16px">Checking totals…</div>
+  {% endif %}
 
-<div id="log-panel">
-  <h2>Log Submission to Sheet</h2>
-  <p class="sub">After SUFS shows the confirmation page, paste the student name and reimbursement ID below, then click Log to Sheet.</p>
-  <div class="log-fields">
-    <div>
-      <label for="student-name">Student Name</label>
-      <input type="text" id="student-name" placeholder="e.g. Zechariah Albright" />
-    </div>
-    <div>
-      <label for="sufs-id">SUFS Reimbursement ID</label>
-      <input type="text" id="sufs-id" placeholder="e.g. 34405627" />
-    </div>
+  <div class="url-row">
+    <label for="form-url">Form URL (optional — used if no SUFS tab is open):</label>
+    <input type="text" id="form-url" placeholder="https://apply.stepupforstudents.org/SubmitReimbursement/..." />
   </div>
-  <button class="btn btn-primary" onclick="logToSheet()">Log to Sheet</button>
-  <div id="log-status"></div>
+
+  <div id="items-container" class="stack">
+    {% for item in items %}
+    {% set m = matches[loop.index0] if matches else None %}
+    <div class="item-card" id="card-{{ loop.index0 }}" data-index="{{ loop.index0 }}">
+      <div class="item-header">
+        <input type="checkbox" id="include-{{ loop.index0 }}" checked onchange="toggleCard({{ loop.index0 }})" />
+        <span class="item-number">Item {{ '%02d' % loop.index }}</span>
+      </div>
+      <div class="grid">
+
+        <div class="field">
+          <label>Purchase Date</label>
+          <input type="text" data-field="purchase_date" value="{{ item.purchase_date or '' }}" placeholder="MM/DD/YYYY" />
+        </div>
+
+        <div class="field">
+          <label>Category{% if m and m.category.confidence in ['low','medium'] %} <span class="conf-badge {{ m.category.confidence }}" title="Auto-matched from &quot;{{ m.category.raw }}&quot; — please verify">{{ m.category.confidence }}</span>{% endif %}</label>
+          <select data-field="category" onchange="onCategoryChange({{ loop.index0 }}, this.value)" id="cat-{{ loop.index0 }}">
+            <option value="{{ (m.category.value if m else item.category) or '' }}">{{ (m.category.value if m else item.category) or '— loading —' }}</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Type{% if m and m.type.confidence in ['low','medium'] %} <span class="conf-badge {{ m.type.confidence }}" title="Auto-matched from &quot;{{ m.type.raw }}&quot; — please verify">{{ m.type.confidence }}</span>{% endif %}</label>
+          <select data-field="type" onchange="onTypeChange({{ loop.index0 }}, this.value)" id="type-{{ loop.index0 }}">
+            <option value="{{ (m.type.value if m else item.type) or '' }}">{{ (m.type.value if m else item.type) or '— loading —' }}</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Description{% if m and m.description.confidence in ['low','medium'] %} <span class="conf-badge {{ m.description.confidence }}" title="Auto-matched from &quot;{{ m.description.raw }}&quot; — please verify">{{ m.description.confidence }}</span>{% endif %}</label>
+          <select data-field="description" id="desc-{{ loop.index0 }}">
+            <option value="{{ (m.description.value if m else item.description) or '' }}">{{ (m.description.value if m else item.description) or '— loading —' }}</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Quantity</label>
+          <input type="number" data-field="quantity" value="{{ item.quantity or '' }}" min="0" step="1" />
+        </div>
+
+        <div class="field">
+          <label>Cost ($)</label>
+          <input type="number" data-field="cost" value="{{ item.cost or '' }}" min="0" step="0.01" />
+        </div>
+
+        <div class="field">
+          <label>Tax ($)</label>
+          <input type="number" data-field="tax" value="{{ item.tax or '' }}" min="0" step="0.01" />
+        </div>
+
+        <div class="field">
+          <label>Vendor{% if m and m.vendor.confidence in ['low','medium'] %} <span class="conf-badge {{ m.vendor.confidence }}" title="Auto-matched from &quot;{{ m.vendor.raw }}&quot; — please verify">{{ m.vendor.confidence }}</span>{% endif %}</label>
+          <select data-field="vendor" id="vendor-{{ loop.index0 }}">
+            <option value="{{ (m.vendor.value if m else item.vendor) or '' }}">{{ (m.vendor.value if m else item.vendor) or '— loading —' }}</option>
+          </select>
+        </div>
+
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="actions">
+    <a href="/" class="btn btn-secondary">← Start over</a>
+    <button class="btn btn-primary" onclick="submitItems()">Fill form</button>
+  </div>
+  <div id="status"></div>
+  <div id="verify-panel" class="card"></div>
+
+  <div id="log-panel" class="card">
+    <h2>Log submission to sheet</h2>
+    <p class="sub">After SUFS shows the confirmation page, paste the student name and reimbursement ID below, then log it.</p>
+    <div class="log-fields">
+      <div>
+        <label for="student-name">Student Name</label>
+        <input type="text" id="student-name" placeholder="e.g. Zechariah Albright" />
+      </div>
+      <div>
+        <label for="sufs-id">SUFS Reimbursement ID</label>
+        <input type="text" id="sufs-id" placeholder="e.g. 34405627" />
+      </div>
+    </div>
+    <button class="btn btn-green" onclick="logToSheet()">Log to sheet</button>
+    <div id="log-status"></div>
+  </div>
 </div>
 
 <script>
@@ -339,8 +341,8 @@ function renderVerification(submitted, readback) {
         + `<td>${warn ? '⚠' : '<span class="vok">✓</span>'}</td></tr>`;
     });
     html += `<div class="vitem"><strong>Item ${i + 1}</strong>`
-      + '<table><thead><tr><th>Field</th><th>Sent</th><th>In form</th><th></th></tr></thead>'
-      + `<tbody>${rows}</tbody></table></div>`;
+      + '<div class="table-wrap"><table><thead><tr><th>Field</th><th>Sent</th><th>In form</th><th></th></tr></thead>'
+      + `<tbody>${rows}</tbody></table></div></div>`;
   });
   panel.innerHTML = html;
   panel.style.display = 'block';

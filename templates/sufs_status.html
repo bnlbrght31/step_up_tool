@@ -4,47 +4,38 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SUFS Status Scan — {{ meta.title }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ledger.css') }}">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f9; min-height: 100vh; padding: 30px 16px; }
-    .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.1); padding: 32px; width: 100%; max-width: 880px; margin: 0 auto; }
-    a.back { color: #3182ce; font-size: .85rem; text-decoration: none; }
-    h1 { font-size: 1.4rem; color: #1a202c; margin: 8px 0 4px; }
-    p.sub { color: #718096; font-size: .9rem; margin-bottom: 20px; }
-    .btn { padding: 10px 18px; border: none; border-radius: 8px; font-size: .9rem; font-weight: 600; cursor: pointer; }
-    .btn-primary { background: #3182ce; color: #fff; }
-    .btn-primary:hover { background: #2b6cb0; }
-    .btn-primary:disabled { background: #a0aec0; cursor: not-allowed; }
-    .btn-green { background: #38a169; color: #fff; }
-    .btn-green:hover { background: #2f855a; }
-    .row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
-    label.chk { font-size: .85rem; color: #4a5568; display: flex; align-items: center; gap: 6px; }
-    #status { font-size: .85rem; margin: 10px 0; min-height: 1.2em; }
-    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: .82rem; }
-    th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #edf2f7; }
-    th { color: #718096; font-weight: 600; background: #f7fafc; }
-    td.partial { color: #b7791f; }
-    .empty { color: #a0aec0; }
-    .summary { font-size: .82rem; color: #718096; margin-top: 10px; }
+    .row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    #status { font-family: var(--mono); font-size: .84rem; margin: 14px 0 4px; min-height: 1.2em; color: var(--ink-2); }
+    #summary { margin-top: 8px; }
+    #results { margin-top: 12px; overflow-x: auto; }
+    #apply-row { margin-top: 20px; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <a class="back" href="/">← Back</a>
-    <h1>SUFS Status Scan</h1>
-    <p class="sub">{{ meta.title }} — scans your Gmail for approval / on-hold / payment emails and proposes date updates. Nothing is written until you click <strong>Write</strong>.</p>
+  <div class="shell">
+    <a class="back" href="/">← Back to intake</a>
+    <p class="eyebrow" style="margin-top:18px">Step Up for Students · Status Scan</p>
+    <h1 class="title">{{ meta.title }}</h1>
+    <p class="sub">Scans your Gmail for approval, on-hold &amp; payment emails and proposes date updates. <b>Nothing is written until you click Write.</b></p>
 
-    <div class="row">
-      <button class="btn btn-primary" id="scan-btn" onclick="runScan()">Scan emails</button>
-      <label class="chk"><input type="checkbox" id="overwrite" /> Overwrite values that already exist</label>
-    </div>
+    <div class="card" style="margin-top:24px">
+      <div class="row">
+        <button class="btn btn-primary" id="scan-btn" onclick="runScan()">Scan emails</button>
+        <label class="chk"><input type="checkbox" id="overwrite" /> Overwrite values that already exist</label>
+      </div>
 
-    <div id="status"></div>
-    <div id="summary" class="summary"></div>
-    <div id="results"></div>
+      <div id="status"></div>
+      <div id="summary" class="summary"></div>
+      <div id="results"></div>
 
-    <div class="row" id="apply-row" style="display:none;margin-top:18px;">
-      <button class="btn btn-green" id="apply-btn" onclick="applyUpdates()">Write <span id="apply-count">0</span> update(s) to the sheet</button>
+      <div class="row" id="apply-row" style="display:none;">
+        <button class="btn btn-green" id="apply-btn" onclick="applyUpdates()">Write <span id="apply-count">0</span> update(s) to the sheet</button>
+      </div>
     </div>
   </div>
 
@@ -85,7 +76,7 @@
 
     async function runScan() {
       scanBtn.disabled = true; scanBtn.textContent = 'Scanning…';
-      statusEl.style.color = '#4a5568'; statusEl.textContent = 'Reading the sheet and scanning Gmail… (this can take 30–60s)';
+      statusEl.style.color = '#46574E'; statusEl.textContent = 'Reading the sheet and scanning Gmail… (this can take 30–60s)';
       summaryEl.textContent = ''; resultsEl.innerHTML = ''; applyRow.style.display = 'none'; pending = [];
       try {
         const res = await fetch(`/sufs-scan/${TAB}/preview`, {
@@ -93,7 +84,7 @@
           body: JSON.stringify({ overwrite: document.getElementById('overwrite').checked })
         });
         const d = await res.json();
-        if (d.error) { statusEl.style.color = '#c53030'; statusEl.textContent = 'Error: ' + d.error; return; }
+        if (d.error) { statusEl.style.color = '#A6382F'; statusEl.textContent = 'Error: ' + d.error; return; }
         pending = d.updates || [];
         const s = d.scanned || {};
         summaryEl.textContent = 'Emails found — ' + Object.entries(s).map(([k, v]) => `${k}: ${v}`).join(', ');
@@ -108,7 +99,7 @@
           applyRow.style.display = 'flex';
         }
       } catch (e) {
-        statusEl.style.color = '#c53030'; statusEl.textContent = 'Network error: ' + e.message;
+        statusEl.style.color = '#A6382F'; statusEl.textContent = 'Network error: ' + e.message;
       } finally {
         scanBtn.disabled = false; scanBtn.textContent = 'Scan emails';
       }
@@ -128,11 +119,11 @@
           statusEl.textContent = `✓ Wrote ${d.written} update(s) to the sheet.`;
           resultsEl.innerHTML = ''; applyRow.style.display = 'none'; pending = [];
         } else {
-          statusEl.style.color = '#c53030'; statusEl.textContent = 'Error: ' + (d.error || 'write failed');
+          statusEl.style.color = '#A6382F'; statusEl.textContent = 'Error: ' + (d.error || 'write failed');
           applyBtn.disabled = false; applyBtn.textContent = 'Write update(s) to the sheet';
         }
       } catch (e) {
-        statusEl.style.color = '#c53030'; statusEl.textContent = 'Network error: ' + e.message;
+        statusEl.style.color = '#A6382F'; statusEl.textContent = 'Network error: ' + e.message;
         applyBtn.disabled = false;
       }
     }
