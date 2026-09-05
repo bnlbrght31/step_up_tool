@@ -129,21 +129,31 @@ def batch_check_eligibility(descriptions: list) -> list:
     guide = guide_path.read_text() if guide_path.exists() else ""
     client = anthropic.Anthropic()
     total_in = total_out = 0
+    total_cache_write = total_cache_read = 0
 
-    def _call_claude(chunk: list) -> list:
-        nonlocal total_in, total_out
-        # Send as JSON array so special characters (quotes, slashes) don't confuse parsing.
-        # Ask for a JSON object keyed by index so a missing entry doesn't shift all results.
-        items_json = _json.dumps(chunk)
-        prompt = f"""You are checking whether Amazon purchase descriptions are eligible for the Step Up For Students (SUFS) scholarship reimbursement program in Florida.
+    # The guide is identical for every chunk, so it goes in a cached system block
+    # ahead of the per-chunk items. A scan sends it once at 1.25x and every later
+    # chunk reads it at 0.1x instead of resending ~5.6k tokens each time.
+    system = [
+        {
+            "type": "text",
+            "text": f"""You are checking whether Amazon purchase descriptions are eligible for the Step Up For Students (SUFS) scholarship reimbursement program in Florida.
 
 Use the purchasing guide below to decide eligibility.
 
 --- PURCHASING GUIDE ---
 {guide}
---- END GUIDE ---
+--- END GUIDE ---""",
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
 
-Below is a JSON array of Amazon item descriptions (0-indexed). For each index return the top-level SUFS category if eligible, or null if not eligible (e.g. personal clothing, adult items, household goods unrelated to education).
+    def _call_claude(chunk: list) -> list:
+        nonlocal total_in, total_out, total_cache_write, total_cache_read
+        # Send as JSON array so special characters (quotes, slashes) don't confuse parsing.
+        # Ask for a JSON object keyed by index so a missing entry doesn't shift all results.
+        items_json = _json.dumps(chunk)
+        prompt = f"""Below is a JSON array of Amazon item descriptions (0-indexed). For each index return the top-level SUFS category if eligible, or null if not eligible (e.g. personal clothing, adult items, household goods unrelated to education).
 
 Items:
 {items_json}
@@ -156,6 +166,7 @@ No explanation, no markdown."""
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=2048,
+            system=system,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = msg.content[0].text.strip()
@@ -167,6 +178,8 @@ No explanation, no markdown."""
         result_map = _json.loads(raw)
         total_in += msg.usage.input_tokens
         total_out += msg.usage.output_tokens
+        total_cache_write += getattr(msg.usage, "cache_creation_input_tokens", 0) or 0
+        total_cache_read += getattr(msg.usage, "cache_read_input_tokens", 0) or 0
         # Build list in order, falling back to keyword match for any missing index
         return [result_map.get(str(i)) or check_eligibility(chunk[i]) for i in range(len(chunk))]
 
@@ -181,9 +194,19 @@ No explanation, no markdown."""
             all_results.extend([check_eligibility(d) for d in chunk])
 
     eligibility_cost = 0.0
-    if total_in or total_out:
-        eligibility_cost = (total_in * 0.80 + total_out * 4.00) / 1_000_000
-        print(f"[eligibility check] API cost: ${eligibility_cost:.4f}  ({total_in:,} in / {total_out:,} out)")
+    if total_in or total_out or total_cache_write or total_cache_read:
+        # Cache writes bill at 1.25x the input rate, reads at 0.1x; neither is
+        # included in input_tokens.
+        eligibility_cost = (
+            total_in * 0.80
+            + total_cache_write * 0.80 * 1.25
+            + total_cache_read * 0.80 * 0.10
+            + total_out * 4.00
+        ) / 1_000_000
+        cache = ""
+        if total_cache_write or total_cache_read:
+            cache = f", {total_cache_write:,} cache-write / {total_cache_read:,} cache-read"
+        print(f"[eligibility check] API cost: ${eligibility_cost:.4f}  ({total_in:,} in / {total_out:,} out{cache})")
 
     return all_results, eligibility_cost
 

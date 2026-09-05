@@ -15,23 +15,45 @@ PRICING = {
     "claude-haiku-4-5-20251001": (0.80,  4.00),
 }
 
-def _print_cost(model: str, usage, label: str = ""):
+def usage_cost(model: str, usage) -> float:
+    """Dollar cost of one call, including cached tokens.
+
+    Cache writes bill at 1.25x the input rate and reads at 0.1x, and neither is
+    counted in usage.input_tokens — so pricing off input_tokens alone understates
+    the first call and overstates every cached one.
+    """
     input_price, output_price = PRICING.get(model, (3.00, 15.00))
-    cost = (usage.input_tokens * input_price + usage.output_tokens * output_price) / 1_000_000
+    cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    return (
+        usage.input_tokens * input_price
+        + cache_write * input_price * 1.25
+        + cache_read * input_price * 0.10
+        + usage.output_tokens * output_price
+    ) / 1_000_000
+
+
+def _print_cost(model: str, usage, label: str = ""):
+    cost = usage_cost(model, usage)
+    cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    cache = ""
+    if cache_write or cache_read:
+        cache = f", {cache_write:,} cache-write / {cache_read:,} cache-read"
     tag = f"[{label}] " if label else ""
-    print(f"{tag}API cost: ${cost:.4f}  ({usage.input_tokens:,} in / {usage.output_tokens:,} out)")
+    print(f"{tag}API cost: ${cost:.4f}  ({usage.input_tokens:,} in / {usage.output_tokens:,} out{cache})")
 
 _GUIDE_PATH = Path(__file__).parent.parent / "docs" / "purchasing_guide_reference.md"
 
-EXTRACTION_PROMPT_TEMPLATE = """You are a receipt parser for the Step Up For Students scholarship reimbursement program in Florida.
+SYSTEM_TEMPLATE = """You are a receipt parser for the Step Up For Students scholarship reimbursement program in Florida.
 
 Use the purchasing guide reference below to assign the correct category and type to each item.
 
 --- PURCHASING GUIDE REFERENCE ---
 {guide}
---- END REFERENCE ---
+--- END REFERENCE ---"""
 
-Extract EVERY line item from this receipt exactly as it appears — do not filter, skip, or comment on any items. For each item return:
+EXTRACTION_INSTRUCTIONS = """Extract EVERY line item from this receipt exactly as it appears — do not filter, skip, or comment on any items. For each item return:
 - purchase_date: date of purchase as MM/DD/YYYY (use the receipt date if per-item date is absent)
 - category: the top-level category from the purchasing guide (e.g. "Instructional Materials", "Tuition & Fees", "Part-Time Tutoring & Choice Navigator Services")
 - type: the sub-type within that category (e.g. "Books", "Learning Manipulatives & Creative Play Items", "Physical Education (P.E.)", "At-Home Classroom Furnishings")
@@ -46,9 +68,9 @@ Do NOT compute or distribute tax per item. Instead, return the receipt's totals 
 - grand_total: the final amount charged (subtotal + tax), or null if not shown
 
 Return ONLY a valid JSON object with no markdown fences, no explanation, no other text. Example:
-{{
+{
   "items": [
-    {{
+    {
       "purchase_date": "03/12/2025",
       "category": "Instructional Materials",
       "type": "Books",
@@ -56,17 +78,33 @@ Return ONLY a valid JSON object with no markdown fences, no explanation, no othe
       "quantity": 1,
       "cost": 18.99,
       "vendor": "Barnes & Noble"
-    }}
+    }
   ],
-  "totals": {{ "subtotal": 18.99, "tax": 1.33, "grand_total": 20.32 }}
-}}
+  "totals": { "subtotal": 18.99, "tax": 1.33, "grand_total": 20.32 }
+}
 
 If a field cannot be determined, use null."""
 
 
-def _build_prompt() -> str:
-    guide = _GUIDE_PATH.read_text() if _GUIDE_PATH.exists() else ""
-    return EXTRACTION_PROMPT_TEMPLATE.format(guide=guide)
+def load_guide() -> str:
+    return _GUIDE_PATH.read_text() if _GUIDE_PATH.exists() else ""
+
+
+def _build_system() -> list[dict]:
+    """Guide as a cached system block.
+
+    The guide is identical on every call, so caching it here — ahead of the
+    receipt, which changes every time — lets repeat parses read it at 0.1x
+    instead of resending ~5.6k tokens. Caching is a prefix match, so the order
+    matters: guide first, varying content after.
+    """
+    return [
+        {
+            "type": "text",
+            "text": SYSTEM_TEMPLATE.format(guide=load_guide()),
+            "cache_control": {"type": "ephemeral", "ttl": "1h"},
+        }
+    ]
 
 
 def _num(x):
@@ -138,6 +176,7 @@ def parse_receipt(pdf_path: str) -> tuple[list[LineItem], float, dict]:
     message = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=8192,
+        system=_build_system(),
         messages=[
             {
                 "role": "user",
@@ -150,14 +189,13 @@ def parse_receipt(pdf_path: str) -> tuple[list[LineItem], float, dict]:
                             "data": pdf_b64,
                         },
                     },
-                    {"type": "text", "text": _build_prompt()},
+                    {"type": "text", "text": EXTRACTION_INSTRUCTIONS},
                 ],
             }
         ],
     )
 
-    input_tokens, output_tokens = message.usage.input_tokens, message.usage.output_tokens
-    parse_cost = (input_tokens * 3.00 + output_tokens * 15.00) / 1_000_000
+    parse_cost = usage_cost("claude-sonnet-4-6", message.usage)
     _print_cost("claude-sonnet-4-6", message.usage, "receipt parser")
     raw = message.content[0].text.strip()
 
