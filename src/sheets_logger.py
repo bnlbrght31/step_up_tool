@@ -6,6 +6,7 @@ Column order: Student | Item | Store | Order number | Price | Date Purchased | S
 """
 
 import os
+import re
 
 SHEET_ID = os.environ.get("SUFS_SHEET_ID", "")
 TAB = "2025-2026"
@@ -43,7 +44,7 @@ TESTING_HEADER = [
 # Header for the Unsubmitted staging tab (one row per Amazon order). Column D is
 # the order number, which get_existing_order_numbers reads to skip duplicates.
 UNSUBMITTED_HEADER = [
-    "Student", "Item", "Store", "Order Number", "Price", "Date Purchased", "Status",
+    "Student", "Item", "Store", "Order/Receipt #", "Price", "Date Purchased", "Status",
 ]
 
 # Columns for TESTING_TAB:
@@ -396,3 +397,147 @@ def batch_write_testing_status(updates: list[dict]):
     except Exception as e:
         print(f"[sheets] Error writing testing status: {e}")
         raise
+
+
+# ---------------------------------------------------------------------------
+# Unsubmitted staging-tab cleanup
+# ---------------------------------------------------------------------------
+# A staged order leaves the Unsubmitted tab ONLY when the user explicitly asks
+# after logging a submission -- never automatically. One purchase is often
+# reimbursed separately for each child, and only the user knows when the last
+# child has been submitted.
+#
+# Rows are matched by the Order/Receipt # column: the Amazon scanner fills it
+# with the order number, and for other vendors the user pastes their own
+# reference there when adding the row by hand.
+
+# Column G of UNSUBMITTED_HEADER.
+_UNSUBMITTED_STATUS_COL = "G"
+
+
+def reference_from_invoice(invoice_filename: str) -> str:
+    """The staging reference behind an uploaded receipt, or "" if there is none.
+
+    For Amazon that's the order number the scanner staged (111-7468621-1016217);
+    for every other vendor it's whatever the user pasted into the Order/Receipt #
+    column when adding the row by hand. Either way it's just the receipt's
+    filename without its extension.
+    """
+    # Not os.path.splitext: it reads ".pdf" as a dotfile named ".pdf" rather
+    # than an empty name, which would hand back a bogus reference.
+    return re.sub(r"\.[A-Za-z0-9]+$", "", (invoice_filename or "").strip()).strip()
+
+
+def _normalize_reference(value: str) -> str:
+    """Fold a reference to its comparable form.
+
+    Matching ignores case, surrounding whitespace, and the difference between
+    spaces and underscores -- uploads run through secure_filename(), which turns
+    "Target 8-14-26.pdf" into "Target_8-14-26.pdf". Everything else, hyphens
+    included, is compared literally, so exact means exact.
+    """
+    return re.sub(r"[\s_]+", " ", (value or "").strip()).casefold()
+
+
+def _unsubmitted_rows() -> list[list]:
+    """All rows of the Unsubmitted tab, header included, padded to full width."""
+    svc = _get_service()
+    rows = svc.spreadsheets().values().get(
+        spreadsheetId=SHEET_ID, range=f"{UNSUBMITTED_TAB}!A:G",
+    ).execute().get("values", [])
+    width = len(UNSUBMITTED_HEADER)
+    return [list(r) + [""] * (width - len(r)) for r in rows]
+
+
+def _matching_row_indexes(reference: str) -> list[int]:
+    """1-based sheet row numbers whose Order/Receipt # matches this reference."""
+    wanted = _normalize_reference(reference)
+    if not wanted:
+        return []
+    return [i for i, r in enumerate(_unsubmitted_rows(), start=1)
+            if i > 1 and _normalize_reference(r[3]) == wanted]
+
+
+def find_unsubmitted_row(reference: str) -> dict | None:
+    """The staged row for this reference, or None if it isn't staged.
+
+    Returns the row's 1-based sheet index plus its display fields, including any
+    existing "partial:" note so the caller can show which children are done.
+    """
+    wanted = _normalize_reference(reference)
+    if not wanted:
+        return None
+    for i, r in enumerate(_unsubmitted_rows(), start=1):
+        if i > 1 and _normalize_reference(r[3]) == wanted:
+            return {
+                "row_index": i,
+                "student": r[0], "item": r[1], "store": r[2],
+                "order_number": r[3], "price": r[4],
+                "date_purchased": r[5], "status": r[6],
+            }
+    return None
+
+
+def delete_unsubmitted_row(reference: str) -> bool:
+    """Delete the staged row carrying this Order/Receipt #.
+
+    Returns True if a row was deleted, False if nothing was staged under that
+    reference (already removed -- clicking twice is harmless). Raises ValueError
+    if it matches more than one row, rather than guessing which to drop.
+    """
+    matches = _matching_row_indexes(reference)
+    if not matches:
+        return False
+    if len(matches) > 1:
+        raise ValueError(
+            f"{reference} appears in {UNSUBMITTED_TAB} {len(matches)} times "
+            f"(rows {', '.join(str(m) for m in matches)}); refusing to guess. "
+            "Remove the duplicates by hand."
+        )
+    row = matches[0]
+    svc = _get_service()
+    gid = None
+    for sheet in svc.spreadsheets().get(spreadsheetId=SHEET_ID).execute()["sheets"]:
+        if sheet["properties"]["title"] == UNSUBMITTED_TAB:
+            gid = sheet["properties"]["sheetId"]
+            break
+    if gid is None:
+        raise ValueError(f"{UNSUBMITTED_TAB} tab not found")
+    svc.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests": [
+        {"deleteDimension": {"range": {
+            "sheetId": gid, "dimension": "ROWS",
+            "startIndex": row - 1, "endIndex": row,
+        }}}
+    ]}).execute()
+    return True
+
+
+def mark_unsubmitted_partial(reference: str, student: str, sufs_id: str) -> str:
+    """Record on the staged row that one child has been submitted for it.
+
+    Appends "partial: <student> <sufs_id> (MM/DD)" to the Status column, so a
+    multi-child purchase shows its progress at a glance. Repeating the same
+    child and reimbursement ID is a no-op. Returns the resulting Status text
+    ("" if nothing is staged under that reference).
+    """
+    row = find_unsubmitted_row(reference)
+    if row is None:
+        return ""
+
+    from datetime import date as _date
+    marker = f"partial: {student.strip()} {sufs_id.strip()}".rstrip()
+    existing = (row["status"] or "").strip()
+    if marker in existing:
+        return existing
+
+    note = f"{marker} ({_date.today().strftime('%m/%d')})"
+    updated = f"{existing}; {note}" if existing else note
+
+    svc = _get_service()
+    svc.spreadsheets().values().update(
+        spreadsheetId=SHEET_ID,
+        range=f"{UNSUBMITTED_TAB}!{_UNSUBMITTED_STATUS_COL}{row['row_index']}",
+        valueInputOption="RAW",
+        body={"values": [[updated]]},
+    ).execute()
+    return updated

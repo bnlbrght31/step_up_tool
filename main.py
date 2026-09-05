@@ -17,10 +17,14 @@ from src.models import LineItem
 from src.option_match import build_matches
 from src.pdf_downloader import download_invoices
 from src.receipt_parser import parse_receipt
-from src.sheets_logger import append_orders, get_existing_order_numbers, log_submission_to_testing
+from src.sheets_logger import append_orders, get_existing_order_numbers
+from src.submission_routes import bp as submission_bp
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+
+# /log-submission and the Unsubmitted cleanup routes.
+app.register_blueprint(submission_bp)
 
 UPLOAD_DIR = Path("/tmp/sufs_uploads")
 ALLOWED_EXTENSIONS = {"pdf"}
@@ -119,26 +123,6 @@ def fill():
     try:
         readback = asyncio.run(fill_form(form_url=form_url, items=selected, cdp_port=cdp_port))
         return jsonify({"success": True, "filled": len(selected), "readback": readback})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/log-submission", methods=["POST"])
-def log_submission():
-    data = request.get_json() or {}
-    student = data.get("student", "").strip()
-    sufs_id = data.get("sufs_id", "").strip()
-    items   = [i for i in data.get("items", []) if i.get("include")]
-
-    if not student or not sufs_id:
-        return jsonify({"error": "Student name and SUFS ID are required."}), 400
-    if not items:
-        return jsonify({"error": "No selected items to log."}), 400
-
-    invoice_filename = session.get("invoice_filename", "")
-    try:
-        log_submission_to_testing(student, sufs_id, items, invoice_filename)
-        return jsonify({"success": True, "logged": len(items)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

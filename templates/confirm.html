@@ -58,6 +58,21 @@
     #log-status.success { background: var(--ok-bg); color: var(--ok); }
     #log-status.error { background: var(--danger-bg); color: var(--danger); }
 
+    #unsubmitted-panel {
+      display: none; margin-top: 18px; padding: 18px 20px;
+      background: var(--info-bg); border: 1px solid var(--rule); border-radius: 10px;
+    }
+    #unsubmitted-panel strong {
+      font-family: var(--mono); font-size: .68rem; font-weight: 600;
+      letter-spacing: .1em; text-transform: uppercase; color: var(--pine-deep);
+    }
+    #unsubmitted-panel .detail { margin: 8px 0 2px; font-size: .92rem; color: var(--ink-2); }
+    #unsubmitted-panel .note { margin: 0 0 14px; font-size: .82rem; color: var(--ink-3); display: none; }
+    #unsubmitted-panel .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    #unsubmitted-status { margin-top: 14px; padding: 10px 14px; border-radius: 8px; font-size: .88rem; display: none; }
+    #unsubmitted-status.success { background: var(--ok-bg); color: var(--ok); }
+    #unsubmitted-status.error { background: var(--danger-bg); color: var(--danger); }
+
     @media (max-width: 480px) { .log-fields { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -175,6 +190,17 @@
     </div>
     <button class="btn btn-green" onclick="logToSheet()">Log to sheet</button>
     <div id="log-status"></div>
+
+    <div id="unsubmitted-panel">
+      <strong>Still in Unsubmitted</strong>
+      <p class="detail" id="unsubmitted-detail"></p>
+      <p class="note" id="unsubmitted-note"></p>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="removeUnsubmitted()">Remove from Unsubmitted</button>
+        <button class="btn" onclick="keepUnsubmitted()">Keep — more kids to submit</button>
+      </div>
+      <div id="unsubmitted-status"></div>
+    </div>
   </div>
 </div>
 
@@ -398,6 +424,7 @@ async function logToSheet() {
     if (data.success) {
       logStatus.className = 'success'; logStatus.style.display = 'block';
       logStatus.textContent = `✓ ${data.logged} row(s) logged to sheet with IDs ${sufsId}-1 through ${sufsId}-${data.logged}.`;
+      showUnsubmittedPrompt(data.unsubmitted);
     } else {
       logStatus.className = 'error'; logStatus.style.display = 'block';
       logStatus.textContent = 'Error: ' + (data.error || 'Unknown error');
@@ -405,6 +432,79 @@ async function logToSheet() {
   } catch (e) {
     logStatus.className = 'error'; logStatus.style.display = 'block';
     logStatus.textContent = 'Network error: ' + e.message;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Unsubmitted staging-tab cleanup
+//
+// A staged order is only removed when the user says so: the same Amazon order
+// is often reimbursed once per child, so "logged" doesn't mean "finished".
+// ---------------------------------------------------------------------------
+let stagedOrder = null;
+
+function showUnsubmittedPrompt(row) {
+  stagedOrder = row;
+  const panel = document.getElementById('unsubmitted-panel');
+  if (!row) { panel.style.display = 'none'; return; }
+
+  document.getElementById('unsubmitted-detail').textContent =
+    `${row.item} · $${row.price} · ${row.store} · ${row.date_purchased} · ${row.order_number}`;
+
+  const note = document.getElementById('unsubmitted-note');
+  if (row.status) {
+    note.textContent = `Already recorded: ${row.status}`;
+    note.style.display = 'block';
+  } else {
+    note.style.display = 'none';
+  }
+
+  document.getElementById('unsubmitted-status').style.display = 'none';
+  panel.style.display = 'block';
+}
+
+function unsubmittedStatus(cls, text) {
+  const el = document.getElementById('unsubmitted-status');
+  el.className = cls; el.style.display = 'block'; el.textContent = text;
+}
+
+async function postUnsubmitted(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return { ok: res.ok, data: await res.json() };
+}
+
+async function removeUnsubmitted() {
+  if (!stagedOrder) return;
+  try {
+    const { ok, data } = await postUnsubmitted('/unsubmitted/remove',
+      { order_number: stagedOrder.order_number });
+    if (!ok) { unsubmittedStatus('error', 'Error: ' + (data.error || 'Unknown error')); return; }
+    unsubmittedStatus('success', data.removed
+      ? '✓ Removed from Unsubmitted.'
+      : 'Already gone from Unsubmitted — nothing to remove.');
+    document.querySelectorAll('#unsubmitted-panel .btn').forEach(b => b.disabled = true);
+  } catch (e) {
+    unsubmittedStatus('error', 'Network error: ' + e.message);
+  }
+}
+
+async function keepUnsubmitted() {
+  if (!stagedOrder) return;
+  try {
+    const { ok, data } = await postUnsubmitted('/unsubmitted/mark', {
+      order_number: stagedOrder.order_number,
+      student: document.getElementById('student-name').value.trim(),
+      sufs_id: document.getElementById('sufs-id').value.trim()
+    });
+    if (!ok) { unsubmittedStatus('error', 'Error: ' + (data.error || 'Unknown error')); return; }
+    unsubmittedStatus('success', `✓ Kept. Status now reads: ${data.status}`);
+    document.querySelectorAll('#unsubmitted-panel .btn').forEach(b => b.disabled = true);
+  } catch (e) {
+    unsubmittedStatus('error', 'Network error: ' + e.message);
   }
 }
 </script>

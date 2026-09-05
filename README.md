@@ -200,6 +200,33 @@ year) with:
 - Today's date in Date Submitted
 - Line item IDs like `34405627-1`, `34405627-2`, etc.
 
+### Step 10 — Clear the order out of Unsubmitted
+
+If the purchase is staged on the **Unsubmitted** tab, a prompt appears right
+after logging:
+
+- **Remove from Unsubmitted** — deletes that staged row. Use this once the order
+  is fully reimbursed.
+- **Keep it — more kids to submit** — leaves the row and stamps its Status
+  column with `partial: <student> <reimbursement id> (MM/DD)`. Use this when the
+  same order still needs submitting for another child; the note accumulates, and
+  the prompt shows it back to you next time so you can see who's already done.
+
+Nothing is ever removed automatically — the same purchase is often reimbursed
+once per child, so only you know when the last one is done.
+
+**Matching.** A staged row is found by its **Order/Receipt #** column. Amazon
+rows get that filled in by the scanner. For any other vendor, paste your own
+reference into that column when you add the row by hand, then name the receipt
+PDF the same thing — `Target 8-14-26` in the column, `Target 8-14-26.pdf`
+uploaded. The match ignores case, surrounding spaces, and the difference between
+spaces and underscores (uploads get sanitised to `Target_8-14-26.pdf`), but is
+otherwise exact: `Target` will not match `Target 8-14-26`. If nothing matches,
+no prompt appears and nothing changes.
+
+Run `python test_unsubmitted_cleanup.py` to exercise this against a fake Sheets
+service (it never touches the live workbook).
+
 ---
 
 ## SUFS Status Scanner
@@ -286,6 +313,33 @@ When a new year starts, make these changes (all one-liners):
 3. **`src/amazon_scanner.py`** — bump `SCHOLARSHIP_START` to July 1 of the new year.
 
 That's it — everything else derives from those constants.
+
+---
+
+## Purchasing guides
+
+`docs/purchasing_guide_reference.md` is the only guide content the app reads. It's
+inlined into the Claude prompts in `src/receipt_parser.py` (categorization) and
+`src/amazon_scanner.py` (eligibility screening), so keeping it accurate and compact
+matters — the Amazon scanner resends it with every 50-item chunk.
+
+SUFS revises the guides annually (usually effective July 1, with amendments after).
+When they do, rewrite that markdown file from the current sources:
+
+- **FES-UA** — PDF from the Florida Center for Students with Unique Abilities:
+  <https://fcsua.org/docs/fesua/2026-27-purchasing-english.pdf>, with a changes summary at
+  <https://fcsua.org/docs/fesua/2026-27-changes-summary-english.pdf>
+- **PEP** — **web-only as of 2026-27**:
+  <https://www.stepupforstudents.org/handbook-web/pep-purchasing-guide/>. The old
+  `go.stepupforstudents.org/hubfs/GUIDES/PEP-Purchasing-Guide.pdf` URL still resolves but
+  serves the stale 2025-26 file — don't use it.
+
+Copies of the sources live in `docs/sources/` (gitignored, since `*.pdf` is), with the
+prior year kept under `docs/sources/archive-2025-26/`.
+
+After rewriting, re-check the category names the guide emits against `form_options.json` —
+the parser's labels are snapped to real dropdown values by `src/option_match.py`, and a
+category that matches nothing silently leaves the form field blank.
 
 ---
 
