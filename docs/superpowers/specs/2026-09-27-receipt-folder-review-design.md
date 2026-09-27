@@ -29,12 +29,12 @@ live sheet sorted its 54 receipts into 38 staged, 4 submitted and 12 untracked.
 
 ```
 ~/Desktop/SUFS/<scholarship year>/      reviewed (top level only)
-    111-7705354-6743464.pdf
+    111-0000011-0000011.pdf
     IMG_1698.pdf
     Originals/                          ignored by the review
         IMG_1698.jpeg
     Not submitting/                     ignored by the review
-        111-4080584-5227408.pdf
+        111-0000014-0000014.pdf
 ```
 
 The folder path comes from `scholarship_year.receipts_folder()`, a new function

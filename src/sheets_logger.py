@@ -306,7 +306,7 @@ _UNSUBMITTED_STATUS_COL = "G"
 def reference_from_invoice(invoice_filename: str) -> str:
     """The staging reference behind an uploaded receipt, or "" if there is none.
 
-    For Amazon that's the order number the scanner staged (111-7468621-1016217);
+    For Amazon that's the order number the scanner staged (111-0000012-0000012);
     for every other vendor it's whatever the user pasted into the Order/Receipt #
     column when adding the row by hand. Either way it's just the receipt's
     filename without its extension.

@@ -27,9 +27,9 @@ def _fake(extra_rows=None, status=""):
     rows = [
         UNSUBMITTED_HEADER,
         # short row, no Status cell -- exactly how the live sheet stores these
-        ["", "Runtoo Kids Wall Decals", "Amazon", "111-7705354-6743464", "18.99", "2025-07-11"],
-        ["", "TMNT Michelangelo", "Amazon", "111-7468621-1016217", "45.99", "2026-06-09"] + ([status] if status else []),
-        ["", "Brick Loot Soccer Balls", "Amazon", "111-5192806-4273051", "15.92", "2026-06-23"],
+        ["", "Wall decals", "Amazon", "111-0000011-0000011", "18.99", "2025-07-11"],
+        ["", "Action figure", "Amazon", "111-0000012-0000012", "45.99", "2026-06-09"] + ([status] if status else []),
+        ["", "Soccer balls", "Amazon", "111-0000013-0000013", "15.92", "2026-06-23"],
         # Hand-entered non-Amazon rows: the reference is whatever the user pasted.
         ["", "School supplies", "Target", "Target 8-14-26", "154.41", "2026-08-14"],
         ["", "Internet Aug", "AT&T", "ATT-AUG-2026", "50.18", "2026-08-06"],
@@ -40,7 +40,7 @@ def _fake(extra_rows=None, status=""):
     return svc
 
 
-TARGET = "111-7468621-1016217"
+TARGET = "111-0000012-0000012"
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ TARGET = "111-7468621-1016217"
 # ---------------------------------------------------------------------------
 
 def test_reference_parsed_from_amazon_invoice_filename():
-    assert sheets_logger.reference_from_invoice("111-7468621-1016217.pdf") == TARGET
+    assert sheets_logger.reference_from_invoice("111-0000012-0000012.pdf") == TARGET
 
 
 def test_reference_parsed_from_any_vendors_filename():
@@ -71,7 +71,7 @@ def test_find_unsubmitted_row_returns_matching_row():
     row = sheets_logger.find_unsubmitted_row(TARGET)
     assert row is not None
     assert row["row_index"] == 3          # 1-based, header is row 1
-    assert row["item"] == "TMNT Michelangelo"
+    assert row["item"] == "Action figure"
     assert row["price"] == "45.99"
     assert row["date_purchased"] == "2026-06-09"
     assert row["status"] == ""            # short row padded, not IndexError
@@ -128,13 +128,13 @@ def test_delete_removes_only_the_matching_row():
     assert sheets_logger.delete_unsubmitted_row(TARGET) is True
     remaining = [r[3] for r in svc.tabs["Unsubmitted"][1:]]
     assert TARGET not in remaining
-    assert remaining == ["111-7705354-6743464", "111-5192806-4273051",
+    assert remaining == ["111-0000011-0000011", "111-0000013-0000013",
                          "Target 8-14-26", "ATT-AUG-2026"]
 
 
 def test_delete_refuses_when_order_number_is_ambiguous():
     """Two rows for one order means we can't tell which to drop -- don't guess."""
-    dupe = ["", "TMNT Michelangelo", "Amazon", TARGET, "45.99", "2026-06-09"]
+    dupe = ["", "Action figure", "Amazon", TARGET, "45.99", "2026-06-09"]
     svc = _fake(extra_rows=[dupe])
     try:
         sheets_logger.delete_unsubmitted_row(TARGET)
@@ -202,7 +202,7 @@ def test_logging_a_submission_never_touches_the_unsubmitted_tab():
     before = [list(r) for r in svc.tabs["Unsubmitted"]]
     sheets_logger.log_submission_to_testing(
         "Alex", "10000001",
-        [{"cost": "45.99", "tax": "0", "description": "TMNT Michelangelo",
+        [{"cost": "45.99", "tax": "0", "description": "Action figure",
           "vendor": "Amazon", "purchase_date": "06/09/2026"}],
         f"{TARGET}.pdf",
     )
@@ -248,7 +248,7 @@ def test_log_submission_reports_the_staged_order_for_confirmation():
     body = r.get_json()
     assert body["success"] is True
     assert body["unsubmitted"]["order_number"] == TARGET
-    assert body["unsubmitted"]["item"] == "TMNT Michelangelo"
+    assert body["unsubmitted"]["item"] == "Action figure"
 
 
 def test_log_submission_reports_nothing_for_an_unmatched_receipt():
@@ -273,7 +273,7 @@ def test_remove_route_deletes_the_staged_row():
 
 
 def test_remove_route_reports_an_ambiguous_order_instead_of_guessing():
-    dupe = ["", "TMNT Michelangelo", "Amazon", TARGET, "45.99", "2026-06-09"]
+    dupe = ["", "Action figure", "Amazon", TARGET, "45.99", "2026-06-09"]
     svc = _fake(extra_rows=[dupe])
     main, c = _client()
     r = c.post("/unsubmitted/remove", json={"order_number": TARGET})
