@@ -5,13 +5,12 @@ Saves to ~/Desktop/SUFS/<scholarship year>/<order_number>.pdf, e.g.
 """
 
 import asyncio
-from pathlib import Path
 
 from playwright.async_api import async_playwright
 
 from src import scholarship_year
 
-OUTPUT_DIR = Path.home() / "Desktop" / "SUFS" / scholarship_year.label(scholarship_year.start_year())
+OUTPUT_DIR = scholarship_year.receipts_folder()
 INVOICE_URL = "https://www.amazon.com/gp/css/summary/print.html?orderID={order_id}"
 
 

@@ -69,6 +69,16 @@ def test_app_modules_take_their_year_values_from_the_shared_setting():
     assert pdf_downloader.OUTPUT_DIR.name == sy.label(year)
 
 
+def test_receipts_folder_is_the_years_folder_under_desktop_sufs():
+    assert sy.receipts_folder(date(2026, 9, 26)) == Path.home() / "Desktop" / "SUFS" / "2026-2027"
+    assert sy.receipts_folder(date(2027, 7, 1)) == Path.home() / "Desktop" / "SUFS" / "2027-2028"
+
+
+def test_invoice_downloader_saves_into_the_receipts_folder():
+    from src import pdf_downloader
+    assert pdf_downloader.OUTPUT_DIR == sy.receipts_folder()
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

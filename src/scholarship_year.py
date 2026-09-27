@@ -9,6 +9,7 @@ rollover on its next restart.
 """
 
 from datetime import date
+from pathlib import Path
 
 # First year tracked in the "<year> Line Items" layout. The 2024-25 tab predates
 # it (different columns) and is never read or written by the app.
@@ -33,6 +34,15 @@ def line_items_tab(year: int) -> str:
 def gmail_date(year: int) -> str:
     """July 1 of `year` in Gmail's after: query format."""
     return f"{year}/07/01"
+
+
+def receipts_folder(today: date | None = None) -> Path:
+    """Where the year's receipts live: ~/Desktop/SUFS/<year label>/.
+
+    The Amazon invoice downloader saves here and the receipts folder review
+    reads it, so both move to the new year's folder each July.
+    """
+    return Path.home() / "Desktop" / "SUFS" / label(start_year(today))
 
 
 def current_line_items_tab(today: date | None = None) -> str:
