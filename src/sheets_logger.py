@@ -319,7 +319,7 @@ def reference_from_invoice(invoice_filename: str) -> str:
     return re.sub(r"\.[A-Za-z0-9]+$", "", (invoice_filename or "").strip()).strip()
 
 
-def _normalize_reference(value: str) -> str:
+def normalize_reference(value: str) -> str:
     """Fold a reference to its comparable form.
 
     Matching ignores case, surrounding whitespace, and the difference between
@@ -342,11 +342,11 @@ def _unsubmitted_rows() -> list[list]:
 
 def _matching_row_indexes(reference: str) -> list[int]:
     """1-based sheet row numbers whose Order/Receipt # matches this reference."""
-    wanted = _normalize_reference(reference)
+    wanted = normalize_reference(reference)
     if not wanted:
         return []
     return [i for i, r in enumerate(_unsubmitted_rows(), start=1)
-            if i > 1 and _normalize_reference(r[3]) == wanted]
+            if i > 1 and normalize_reference(r[3]) == wanted]
 
 
 def find_unsubmitted_row(reference: str) -> dict | None:
@@ -355,11 +355,11 @@ def find_unsubmitted_row(reference: str) -> dict | None:
     Returns the row's 1-based sheet index plus its display fields, including any
     existing "partial:" note so the caller can show which children are done.
     """
-    wanted = _normalize_reference(reference)
+    wanted = normalize_reference(reference)
     if not wanted:
         return None
     for i, r in enumerate(_unsubmitted_rows(), start=1):
-        if i > 1 and _normalize_reference(r[3]) == wanted:
+        if i > 1 and normalize_reference(r[3]) == wanted:
             return {
                 "row_index": i,
                 "student": r[0], "item": r[1], "store": r[2],
