@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from PIL import Image, ImageDraw
+from werkzeug.utils import secure_filename
 import pdfplumber
 
 from fake_sheets import FakeSheets
@@ -472,6 +473,29 @@ def test_receipt_names_are_escaped_and_sent_as_json():
 
 def test_the_home_page_links_to_the_review():
     assert 'href="/receipts"' in (TEMPLATES / "index.html").read_text()
+
+
+# ---------------------------------------------------------------------------
+# Names the upload page sanitises
+# ---------------------------------------------------------------------------
+# /upload stores secure_filename(name) as the Invoice, dropping apostrophes,
+# brackets and accents; the folder and hand-typed sheet rows keep them.
+
+SANITISED = ["Bob's receipt.pdf", "Lowe's 8-1-26.pdf", "Target (2).pdf", "Café.pdf"]
+
+
+def test_a_submitted_receipt_matches_even_when_the_upload_renamed_it():
+    _sheet(submitted=[secure_filename(n) for n in SANITISED])
+    submitted, staged = sheets_logger.read_tracked_references()
+    with _folder({n: PDF for n in SANITISED}) as root:
+        status = {r.reference: r.status for r in rf.review(root, submitted, staged)}
+    assert set(status.values()) == {"submitted"}, status
+
+
+def test_the_remove_prompt_finds_a_row_staged_under_its_original_name():
+    _sheet(staged=["Lowe's 8-1-26"])
+    uploaded = sheets_logger.reference_from_invoice(secure_filename("Lowe's 8-1-26.pdf"))
+    assert sheets_logger.find_unsubmitted_row(uploaded) is not None
 
 
 if __name__ == "__main__":

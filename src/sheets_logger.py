@@ -7,6 +7,8 @@ Uses a service account (same credentials as the pickem app).
 import os
 import re
 
+from werkzeug.utils import secure_filename
+
 from src import scholarship_year
 
 SHEET_ID = os.environ.get("SUFS_SHEET_ID", "")
@@ -319,12 +321,15 @@ def reference_from_invoice(invoice_filename: str) -> str:
 def normalize_reference(value: str) -> str:
     """Fold a reference to its comparable form.
 
-    Matching ignores case, surrounding whitespace, and the difference between
-    spaces and underscores -- uploads run through secure_filename(), which turns
-    "Target 8-14-26.pdf" into "Target_8-14-26.pdf". Everything else, hyphens
-    included, is compared literally, so exact means exact.
+    The upload page stores secure_filename(name) as the Invoice, which drops
+    apostrophes, brackets, accents and other punctuation and turns spaces into
+    underscores ("Lowe's 8-1-26.pdf" becomes "Lowes_8-1-26.pdf"). Names in the
+    receipts folder and rows typed into the sheet keep them. Running every
+    reference through the same secure_filename makes all three agree; case and
+    the space/underscore difference are then ignored. Letters, digits and
+    hyphens survive, so order numbers still compare exactly.
     """
-    return re.sub(r"[\s_]+", " ", (value or "").strip()).casefold()
+    return re.sub(r"[\s_]+", " ", secure_filename((value or "").strip())).strip().casefold()
 
 
 def _unsubmitted_rows() -> list[list]:

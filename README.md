@@ -219,8 +219,9 @@ once per child, so only you know when the last one is done.
 rows get that filled in by the scanner. For any other vendor, paste your own
 reference into that column when you add the row by hand, then name the receipt
 PDF the same thing — `Target 8-14-26` in the column, `Target 8-14-26.pdf`
-uploaded. The match ignores case, surrounding spaces, and the difference between
-spaces and underscores (uploads get sanitised to `Target_8-14-26.pdf`), but is
+uploaded. The match ignores case, surrounding spaces, the difference between
+spaces and underscores, and the punctuation and accents the upload page strips
+from file names (`Lowe's 8-1-26.pdf` is uploaded as `Lowes_8-1-26.pdf`), but is
 otherwise exact: `Target` will not match `Target 8-14-26`. If nothing matches,
 no prompt appears and nothing changes.
 
