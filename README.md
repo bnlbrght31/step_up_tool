@@ -229,6 +229,36 @@ service (it never touches the live workbook).
 
 ---
 
+## Review receipts folder
+
+Keeps the **Unsubmitted** tab a complete to-do list. On the home page, click
+**Review receipts folder**. The app looks at this year's folder
+(`~/Desktop/SUFS/<year>/`, the same one Amazon invoices download to) and sorts
+every receipt into:
+
+- **Untracked**: not submitted and not in Unsubmitted
+- **Staged in Unsubmitted**
+- **Submitted**: in a Line Items tab
+- **Can't process**: a file type it doesn't handle
+
+A receipt is a file *name*, so `IMG_1698.jpeg` and `IMG_1698.pdf` count once.
+
+For untracked receipts:
+
+- **Add to Unsubmitted** stages the checked ones. A photo (`.jpg`, `.png`,
+  `.heic`) is first converted to a PDF of the same name, at about 480 KB instead
+  of about 4 MB, and the photo moves to `Originals/`. Claude then reads the
+  receipt and fills in the item, store, price and purchase date. If it can't
+  read one, the row is added with just the file name for you to fill in.
+- **Not submitting** moves the receipt's files to `Not submitting/`, so it
+  isn't offered again. Drag it back out to undo.
+
+Nothing is ever deleted. Later, when you upload one of these receipts on the
+intake page and log it, the Remove/Keep prompt finds its Unsubmitted row by
+file name.
+
+---
+
 ## SUFS Status Scanner
 
 After SUFS sends approval, on-hold, or payment emails, run this to update your tracking sheet automatically:

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Receipts Folder — SUFS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ledger.css') }}">
+  <style>
+    .folder-path { font-family: var(--mono); font-size: .76rem; color: var(--ink-3); margin-top: 6px; word-break: break-all; }
+    .group { margin-top: 22px; }
+    .group-head { display: flex; align-items: center; gap: 12px; }
+    .group-head .section-label { flex: 1; margin: 0; }
+    .table-wrap { overflow-x: auto; margin-top: 8px; }
+    .collapsed { display: none; }
+    td.check-col { width: 36px; text-align: center; }
+    td.ref { font-family: var(--mono); font-size: .82rem; word-break: break-all; }
+    td.kind, td.size { color: var(--ink-3); white-space: nowrap; }
+    td.result { min-width: 220px; }
+    td.result.ok { color: var(--ok); }
+    td.result.warn { color: var(--pend); }
+    td.result.err { color: var(--danger); }
+    tr.done { opacity: .6; }
+    .action-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
+  </style>
+</head>
+<body>
+  <div class="shell" style="max-width:980px">
+    <a class="back" href="/">← Back to intake</a>
+    <p class="eyebrow" style="margin-top:18px">Step Up for Students · Receipts</p>
+    <h1 class="title">Review receipts folder</h1>
+    <p class="sub">Find receipts in your folder that aren't submitted or staged yet, and stage them in your <b>Unsubmitted</b> tab. Photos are converted to small PDFs first.</p>
+    <p class="folder-path">{{ folder }}</p>
+
+    <div class="card" style="margin-top:24px">
+      <div id="status-bar" class="status-bar"></div>
+      <div id="groups"></div>
+      <div class="action-row">
+        <button class="btn btn-primary" id="add-btn" onclick="addSelected()" disabled>Add to Unsubmitted</button>
+        <button class="btn btn-outline" id="reload-btn" onclick="loadReview()">Review again</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+// [status, heading, starts open]
+const GROUPS = [
+  ['untracked', 'Untracked', true],
+  ['staged', 'Staged in Unsubmitted', false],
+  ['submitted', 'Submitted', false],
+  ['unsupported', "Can't process", false],
+];
+const KIND = { 'pdf': 'PDF', 'photo': 'photo', 'photo+pdf': 'photo + PDF', 'unsupported': '—' };
+
+let receipts = [];
+let running = false;
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function size(bytes) {
+  return bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(bytes / 1024)) + ' KB';
+}
+function setStatus(type, msg) {
+  const bar = document.getElementById('status-bar');
+  bar.className = 'status-bar ' + type;
+  bar.textContent = msg;
+}
+function setResult(i, cls, text) {
+  const el = document.getElementById('result-' + i);
+  el.className = 'result ' + cls;
+  el.textContent = text;
+}
+function lockRow(i) {
+  const row = document.getElementById('row-' + i);
+  row.classList.add('done');
+  row.querySelectorAll('input, button').forEach(el => { el.disabled = true; el.checked = false; });
+}
+function picked() {
+  return [...document.querySelectorAll('.pick:checked:not(:disabled)')].map(cb => Number(cb.dataset.i));
+}
+function updateAddButton() {
+  const n = picked().length;
+  const btn = document.getElementById('add-btn');
+  btn.textContent = n ? `Add ${n} to Unsubmitted` : 'Add to Unsubmitted';
+  btn.disabled = running || !n;
+}
+function toggle(status, btn) {
+  const el = document.getElementById('group-' + status);
+  el.classList.toggle('collapsed');
+  btn.textContent = el.classList.contains('collapsed') ? 'Show' : 'Hide';
+}
+
+function rowHtml(r, untracked) {
+  const i = receipts.indexOf(r);
+  const bytes = r.files.reduce((sum, f) => sum + f.size, 0);
+  return `<tr id="row-${i}">
+    ${untracked ? `<td class="check-col"><input type="checkbox" class="pick" data-i="${i}" checked onchange="updateAddButton()"></td>` : ''}
+    <td class="ref">${esc(r.reference)}</td>
+    <td class="kind">${esc(KIND[r.kind] || r.kind)}</td>
+    <td class="size">${size(bytes)}</td>
+    <td class="result" id="result-${i}">${esc(r.reason)}</td>
+    ${untracked ? `<td><button class="btn btn-sm btn-outline skip-btn" onclick="skip(${i})">Not submitting</button></td>` : ''}
+  </tr>`;
+}
+
+function render() {
+  document.getElementById('groups').innerHTML = GROUPS.map(([status, heading, open]) => {
+    const rows = receipts.filter(r => r.status === status);
+    if (!rows.length) return '';
+    const untracked = status === 'untracked';
+    const toggleBtn = untracked ? ''
+      : `<button class="btn btn-sm btn-outline" onclick="toggle('${status}', this)">${open ? 'Hide' : 'Show'}</button>`;
+    return `<section class="group">
+      <div class="group-head"><p class="section-label">${esc(heading)} (${rows.length})</p>${toggleBtn}</div>
+      <div class="table-wrap ${open ? '' : 'collapsed'}" id="group-${status}">
+        <table><tbody>${rows.map(r => rowHtml(r, untracked)).join('')}</tbody></table>
+      </div>
+    </section>`;
+  }).join('');
+  updateAddButton();
+}
+
+async function post(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let data = {};
+  try { data = await res.json(); } catch (_) {}
+  return { ok: res.ok, data };
+}
+
+async function loadReview() {
+  setStatus('info', 'Reading the folder and your tracking sheet…');
+  document.getElementById('groups').innerHTML = '';
+  document.getElementById('add-btn').disabled = true;
+  try {
+    const res = await fetch('/receipts/review');
+    const data = await res.json();
+    if (!res.ok) { setStatus('err', data.error || 'The review failed.'); return; }
+    receipts = data.receipts;
+    render();
+    const n = receipts.filter(r => r.status === 'untracked').length;
+    setStatus(n ? 'info' : 'ok',
+      n ? `${n} receipt${n === 1 ? '' : 's'} aren't submitted or staged yet.`
+        : 'Every receipt in the folder is submitted or staged.');
+  } catch (e) {
+    setStatus('err', 'Network error: ' + e.message);
+  }
+}
+
+async function skip(i) {
+  if (running) return;
+  const { ok, data } = await post('/receipts/skip', { reference: receipts[i].reference });
+  if (!ok) { setResult(i, 'err', data.error || "Couldn't move it."); return; }
+  setResult(i, 'warn', 'Moved to Not submitting');
+  lockRow(i);
+  updateAddButton();
+}
+
+async function addSelected() {
+  if (running) return;
+  const picks = picked();
+  if (!picks.length) return;
+  running = true;
+  const addBtn = document.getElementById('add-btn');
+  addBtn.disabled = true;
+  document.getElementById('reload-btn').disabled = true;
+  document.querySelectorAll('.pick, .skip-btn').forEach(el => el.disabled = true);
+
+  let added = 0, needDetails = 0, failed = 0, cost = 0;
+  for (const i of picks) {
+    setResult(i, '', 'Working…');
+    try {
+      const { ok, data } = await post('/receipts/add', { reference: receipts[i].reference });
+      if (!ok) { failed++; setResult(i, 'err', data.error || 'Failed'); continue; }
+      if (data.status === 'already_tracked') {
+        setResult(i, 'warn', 'Already staged or submitted — skipped');
+        lockRow(i);
+        continue;
+      }
+      added++;
+      cost += data.cost || 0;
+      if (data.needs_details) {
+        needDetails++;
+        setResult(i, 'warn', "Added — couldn't read the receipt, fill in the details");
+      } else {
+        const row = data.row;
+        const bits = [data.converted ? 'Converted' : '', row['Store'],
+                      row['Price'] ? '$' + row['Price'] : '', row['Date Purchased']].filter(Boolean);
+        setResult(i, 'ok', bits.join(' · ') + ' — Added ✓');
+      }
+      lockRow(i);
+    } catch (e) {
+      failed++;
+      setResult(i, 'err', 'Network error: ' + e.message);
+    }
+  }
+
+  running = false;
+  document.getElementById('reload-btn').disabled = false;
+  // Rows that failed can be retried or skipped.
+  document.querySelectorAll('#group-untracked tr:not(.done) input, #group-untracked tr:not(.done) button')
+    .forEach(el => el.disabled = false);
+  updateAddButton();
+  const parts = [`Added ${added}`];
+  if (needDetails) parts.push(`${needDetails} need${needDetails === 1 ? 's' : ''} details`);
+  if (failed) parts.push(`${failed} failed`);
+  parts.push(`Claude cost $${cost.toFixed(2)}`);
+  setStatus(failed ? 'err' : 'ok', parts.join(' · '));
+}
+
+loadReview();
+</script>
+</body>
+</html>

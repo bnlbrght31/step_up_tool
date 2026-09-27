@@ -443,6 +443,37 @@ def test_paths_and_unknown_names_are_rejected_without_moving_anything():
     assert svc.appends == []
 
 
+# ---------------------------------------------------------------------------
+# Page
+# ---------------------------------------------------------------------------
+
+TEMPLATES = Path(__file__).parent / "templates"
+
+
+def test_the_page_renders_with_the_folder_path():
+    with _folder({}) as root:
+        r = _client(root).get("/receipts")
+    assert r.status_code == 200
+    assert b"Review receipts folder" in r.data
+    assert str(root).encode() in r.data
+
+
+def test_a_second_add_cannot_start_while_a_batch_runs():
+    page = (TEMPLATES / "receipts.html").read_text()
+    assert "if (running) return;" in page
+    assert "addBtn.disabled = true;" in page
+
+
+def test_receipt_names_are_escaped_and_sent_as_json():
+    page = (TEMPLATES / "receipts.html").read_text()
+    assert "esc(r.reference)" in page
+    assert "JSON.stringify(body)" in page
+
+
+def test_the_home_page_links_to_the_review():
+    assert 'href="/receipts"' in (TEMPLATES / "index.html").read_text()
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
