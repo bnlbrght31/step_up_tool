@@ -92,22 +92,10 @@ def get_existing_order_numbers() -> set:
     return seen
 
 
-def append_orders(orders: list):
-    """Append multiple orders in a single API call."""
-    if not orders:
+def append_unsubmitted(rows: list[list]):
+    """Append staged rows (UNSUBMITTED_HEADER order) to the Unsubmitted tab."""
+    if not rows:
         return
-    rows = [
-        [
-            "",
-            o.get("description", ""),
-            "Amazon",
-            o.get("order_number", ""),
-            o.get("total", ""),
-            o.get("purchase_date", ""),
-            "",
-        ]
-        for o in orders
-    ]
     try:
         create_tab(UNSUBMITTED_TAB, UNSUBMITTED_HEADER)  # no-op if it already exists
         svc = _get_service()
@@ -118,8 +106,17 @@ def append_orders(orders: list):
             body={"values": rows},
         ).execute()
     except Exception as e:
-        print(f"[sheets] Error batch appending rows: {e}")
+        print(f"[sheets] Error appending to {UNSUBMITTED_TAB}: {e}")
         raise
+
+
+def append_orders(orders: list):
+    """Stage Amazon orders from the scanner, one row per order."""
+    append_unsubmitted([
+        ["", o.get("description", ""), "Amazon", o.get("order_number", ""),
+         o.get("total", ""), o.get("purchase_date", ""), ""]
+        for o in orders
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -432,3 +429,36 @@ def mark_unsubmitted_partial(reference: str, student: str, sufs_id: str) -> str:
         body={"values": [[updated]]},
     ).execute()
     return updated
+
+
+def read_tracked_references() -> tuple[set[str], set[str]]:
+    """(submitted, staged): normalised references of every receipt the sheet knows.
+
+    Submitted is the Invoice column of every existing Line Items tab (file name
+    without extension); staged is Unsubmitted's Order/Receipt # column.
+
+    Strict, unlike the other readers here: any read error raises. A Line Items
+    tab that doesn't exist yet is skipped by checking the tab list first, never
+    by swallowing an error -- a silently empty result would make every receipt
+    in the folder look untracked.
+    """
+    svc = _get_service()
+    meta = svc.spreadsheets().get(spreadsheetId=SHEET_ID).execute()
+    titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
+
+    def _column_d(tab: str) -> list[str]:
+        rows = svc.spreadsheets().values().get(
+            spreadsheetId=SHEET_ID, range=f"{tab}!D:D",
+        ).execute().get("values", [])
+        return [r[0] for r in rows[1:] if r and r[0].strip()]  # skip header
+
+    submitted = {
+        normalize_reference(reference_from_invoice(name))
+        for tab in LINE_ITEMS_TABS if tab in titles
+        for name in _column_d(tab)
+    }
+    staged = ({normalize_reference(v) for v in _column_d(UNSUBMITTED_TAB)}
+              if UNSUBMITTED_TAB in titles else set())
+    submitted.discard("")
+    staged.discard("")
+    return submitted, staged

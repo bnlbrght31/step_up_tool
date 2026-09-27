@@ -19,7 +19,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from PIL import Image, ImageDraw
 import pdfplumber
 
+from fake_sheets import FakeSheets
 from src import receipt_folder as rf
+from src import sheets_logger
 from src.models import LineItem
 
 
@@ -223,6 +225,84 @@ def test_row_falls_back_to_the_computed_total():
 
 def test_row_for_an_unread_receipt_has_only_the_reference():
     assert rf.row_from_parse("IMG_1", [], None) == ["", "", "", "IMG_1", "", "", ""]
+
+
+# ---------------------------------------------------------------------------
+# Sheet access
+# ---------------------------------------------------------------------------
+
+def _sheet(staged=(), submitted=(), include_current_tab=True):
+    """FakeSheets with Unsubmitted rows staged under `staged` references and Line
+    Items rows whose Invoice column holds `submitted` file names."""
+    tabs = {"Unsubmitted": [sheets_logger.UNSUBMITTED_HEADER]
+            + [["", "item", "Store", ref, "1.00", "08/01/2026", ""] for ref in staged]}
+    prior, current = sheets_logger.LINE_ITEMS_TABS[0], sheets_logger.LINE_ITEMS_TABS[-1]
+    tabs[prior] = [sheets_logger.TESTING_HEADER] + [
+        ["Sam", "item", "Store", name, "1.00", "08/01/2026", "submitted", "10000001-1"]
+        for name in submitted]
+    if include_current_tab and current != prior:
+        tabs[current] = [sheets_logger.TESTING_HEADER]
+    svc = FakeSheets(tabs)
+    sheets_logger._get_service = lambda: svc
+    return svc
+
+
+class _FailingSheets(FakeSheets):
+    """Every value read fails, as with an expired credential or no network."""
+
+    def get(self, spreadsheetId=None, range=None, **kw):
+        if range is not None:
+            raise RuntimeError("503 Service Unavailable")
+        return super().get(spreadsheetId=spreadsheetId, range=range, **kw)
+
+
+def test_append_unsubmitted_appends_rows_as_given():
+    svc = _sheet()
+    row = ["", "Crayons", "Walmart", "IMG_1", "87.36", "07/23/2026", ""]
+    sheets_logger.append_unsubmitted([row])
+    assert svc.tabs["Unsubmitted"][-1] == row
+
+
+def test_append_orders_still_stages_amazon_orders_the_same_way():
+    svc = _sheet()
+    sheets_logger.append_orders([{"description": "Workbook", "order_number": "111-0000001-0000001",
+                                  "total": "9.99", "purchase_date": "2026-08-01"}])
+    assert svc.tabs["Unsubmitted"][-1] == ["", "Workbook", "Amazon", "111-0000001-0000001",
+                                           "9.99", "2026-08-01", ""]
+
+
+def test_tracked_references_are_normalised_file_names():
+    _sheet(staged=["Target 8-14-26"], submitted=["IMG_7.pdf", "111-0000001-0000001.pdf"])
+    submitted, staged = sheets_logger.read_tracked_references()
+    assert submitted == {"img 7", "111-0000001-0000001"}
+    assert staged == {"target 8-14-26"}
+
+
+def test_a_photo_submitted_as_a_pdf_is_classified_submitted():
+    _sheet(submitted=["IMG_7.pdf"])
+    submitted, staged = sheets_logger.read_tracked_references()
+    with _folder({"IMG_7.jpeg": _photo()}) as root:
+        [receipt] = rf.review(root, submitted, staged)
+    assert receipt.status == "submitted"
+
+
+def test_a_line_items_tab_that_doesnt_exist_yet_is_not_an_error():
+    _sheet(submitted=["IMG_7.pdf"], include_current_tab=False)
+    submitted, _ = sheets_logger.read_tracked_references()
+    assert submitted == {"img 7"}
+
+
+def test_a_failed_sheet_read_raises_instead_of_returning_nothing():
+    """Swallowing the error would make every receipt look untracked."""
+    tabs = {"Unsubmitted": [sheets_logger.UNSUBMITTED_HEADER],
+            sheets_logger.LINE_ITEMS_TABS[0]: [sheets_logger.TESTING_HEADER]}
+    sheets_logger._get_service = lambda: _FailingSheets(tabs)
+    try:
+        sheets_logger.read_tracked_references()
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected the read error to propagate")
 
 
 if __name__ == "__main__":
