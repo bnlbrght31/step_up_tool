@@ -176,6 +176,27 @@ def test_a_corrupt_image_raises_and_leaves_no_pdf():
         assert not (root / "IMG_7.pdf").exists()
 
 
+# ---------------------------------------------------------------------------
+# Moving files
+# ---------------------------------------------------------------------------
+
+def test_move_into_creates_the_subfolder_and_moves_every_file():
+    with _folder({"a.pdf": PDF, "a.jpeg": b"jpeg"}) as root:
+        moved = rf.move_into(root, rf.NOT_SUBMITTING, [root / "a.pdf", root / "a.jpeg"])
+        assert sorted(p.name for p in moved) == ["a.jpeg", "a.pdf"]
+        assert all(p.parent == root / rf.NOT_SUBMITTING for p in moved)
+        assert not (root / "a.pdf").exists() and not (root / "a.jpeg").exists()
+
+
+def test_move_into_never_overwrites_a_file_already_there():
+    with _folder({"IMG_1.jpeg": b"new", "Originals/IMG_1.jpeg": b"old",
+                  "Originals/IMG_1 (2).jpeg": b"older"}) as root:
+        [moved] = rf.move_into(root, rf.ORIGINALS, [root / "IMG_1.jpeg"])
+        assert moved.name == "IMG_1 (3).jpeg"
+        assert moved.read_bytes() == b"new"
+        assert (root / "Originals" / "IMG_1.jpeg").read_bytes() == b"old"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

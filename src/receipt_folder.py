@@ -156,3 +156,28 @@ def to_pdf(image_path: Path) -> Path:
         out.unlink(missing_ok=True)
         raise ConversionError(f"Couldn't convert {image_path.name}: {e}") from e
     return out
+
+
+# ---------------------------------------------------------------------------
+# Moving files into the subfolders
+# ---------------------------------------------------------------------------
+
+def _free_name(path: Path) -> Path:
+    """`path`, or `name (2).ext`, `name (3).ext`, … -- the first that doesn't exist."""
+    candidate, n = path, 2
+    while candidate.exists():
+        candidate = path.with_name(f"{path.stem} ({n}){path.suffix}")
+        n += 1
+    return candidate
+
+
+def move_into(folder: Path, subfolder: str, paths: list[Path]) -> list[Path]:
+    """Move `paths` into folder/subfolder, creating it; never overwrites."""
+    dest_dir = folder / subfolder
+    dest_dir.mkdir(exist_ok=True)
+    moved = []
+    for path in paths:
+        dest = _free_name(dest_dir / path.name)
+        path.rename(dest)
+        moved.append(dest)
+    return moved
