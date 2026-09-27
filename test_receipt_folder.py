@@ -305,6 +305,144 @@ def test_a_failed_sheet_read_raises_instead_of_returning_nothing():
         raise AssertionError("expected the read error to propagate")
 
 
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+def _client(root, parse=None):
+    """A test client whose routes read `root` and use a stubbed receipt parser."""
+    from flask import Flask
+    from src import receipt_routes
+
+    receipt_routes.receipts_folder = lambda: root
+    receipt_routes._parse = parse or (lambda pdf: ([_item()], 0.0213, {"grand_total": 87.36}))
+    app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
+    app.register_blueprint(receipt_routes.bp)
+    return app.test_client()
+
+
+def _raise(*_):
+    raise RuntimeError("Claude unavailable")
+
+
+def test_review_lists_each_receipt_with_its_status():
+    _sheet(staged=["b"], submitted=["c.pdf"])
+    with _folder({"a.pdf": PDF, "b.pdf": PDF, "c.pdf": PDF}) as root:
+        data = _client(root).get("/receipts/review").get_json()
+    assert {r["reference"]: r["status"] for r in data["receipts"]} == {
+        "a": "untracked", "b": "staged", "c": "submitted"}
+
+
+def test_review_reports_a_sheet_error_instead_of_listing_receipts():
+    sheets_logger._get_service = lambda: _FailingSheets(
+        {"Unsubmitted": [sheets_logger.UNSUBMITTED_HEADER]})
+    with _folder({"a.pdf": PDF}) as root:
+        r = _client(root).get("/receipts/review")
+    assert r.status_code == 502
+    assert "receipts" not in r.get_json()
+
+
+def test_review_reports_a_missing_folder_clearly():
+    _sheet()
+    with _folder({}) as root:
+        r = _client(root / "2027-2028").get("/receipts/review")
+    assert r.status_code == 404
+    assert "2027-2028" in r.get_json()["error"]
+
+
+def test_add_converts_a_photo_stages_it_and_moves_the_photo():
+    svc = _sheet()
+    with _folder({"IMG_1.jpeg": _photo()}) as root:
+        data = _client(root).post("/receipts/add", json={"reference": "IMG_1"}).get_json()
+        assert data["status"] == "added" and data["converted"] and not data["needs_details"]
+        assert (root / "IMG_1.pdf").exists()
+        assert (root / "Originals" / "IMG_1.jpeg").exists() and not (root / "IMG_1.jpeg").exists()
+    assert svc.tabs["Unsubmitted"][-1] == ["", "Crayons", "Walmart", "IMG_1", "87.36", "07/23/2026", ""]
+    assert data["row"]["Store"] == "Walmart"
+
+
+def test_adding_the_same_receipt_twice_stages_it_once():
+    svc = _sheet()
+    with _folder({"a.pdf": PDF}) as root:
+        client = _client(root)
+        client.post("/receipts/add", json={"reference": "a"})
+        second = client.post("/receipts/add", json={"reference": "a"}).get_json()
+    assert second["status"] == "already_tracked"
+    assert len(svc.appends) == 1
+
+
+def test_an_unreadable_receipt_is_still_staged_with_its_name():
+    svc = _sheet()
+    with _folder({"a.pdf": PDF}) as root:
+        data = _client(root, parse=_raise).post("/receipts/add", json={"reference": "a"}).get_json()
+    assert data["status"] == "added" and data["needs_details"]
+    assert svc.tabs["Unsubmitted"][-1] == ["", "", "", "a", "", "", ""]
+
+
+def test_a_failed_conversion_stages_nothing_and_moves_nothing():
+    svc = _sheet()
+    with _folder({"IMG_2.jpeg": b"not an image"}) as root:
+        r = _client(root).post("/receipts/add", json={"reference": "IMG_2"})
+        assert r.status_code == 422
+        assert (root / "IMG_2.jpeg").exists() and not (root / "Originals").exists()
+    assert svc.appends == []
+
+
+def test_a_failed_sheet_write_leaves_the_photo_in_place():
+    class _NoAppend(FakeSheets):
+        def append(self, *a, **kw):
+            raise RuntimeError("quota exceeded")
+    tabs = {"Unsubmitted": [sheets_logger.UNSUBMITTED_HEADER]}
+    sheets_logger._get_service = lambda: _NoAppend(tabs)
+    with _folder({"IMG_3.jpeg": _photo()}) as root:
+        r = _client(root).post("/receipts/add", json={"reference": "IMG_3"})
+        assert r.status_code == 500
+        assert (root / "IMG_3.jpeg").exists()
+
+
+def test_two_photos_and_no_pdf_converts_the_first_and_moves_both():
+    _sheet()
+    with _folder({"IMG_4.jpeg": _photo(), "IMG_4.png": _photo()}) as root:
+        _client(root).post("/receipts/add", json={"reference": "IMG_4"})
+        assert (root / "IMG_4.pdf").exists()
+        assert sorted(p.name for p in (root / "Originals").iterdir()) == ["IMG_4.jpeg", "IMG_4.png"]
+
+
+def test_names_with_apostrophes_and_spaces_can_be_added():
+    svc = _sheet()
+    with _folder({"Bob's receipt.pdf": PDF}) as root:
+        data = _client(root).post("/receipts/add", json={"reference": "Bob's receipt"}).get_json()
+    assert data["status"] == "added"
+    assert svc.tabs["Unsubmitted"][-1][3] == "Bob's receipt"
+
+
+def test_skip_moves_an_untracked_receipt_to_not_submitting():
+    _sheet()
+    with _folder({"a.pdf": PDF, "a.jpeg": b"jpeg"}) as root:
+        data = _client(root).post("/receipts/skip", json={"reference": "a"}).get_json()
+        assert sorted(data["moved"]) == ["a.jpeg", "a.pdf"]
+        assert (root / "Not submitting" / "a.pdf").exists()
+
+
+def test_skip_refuses_a_staged_receipt():
+    _sheet(staged=["a"])
+    with _folder({"a.pdf": PDF}) as root:
+        r = _client(root).post("/receipts/skip", json={"reference": "a"})
+        assert r.status_code == 409
+        assert (root / "a.pdf").exists()
+
+
+def test_paths_and_unknown_names_are_rejected_without_moving_anything():
+    svc = _sheet()
+    with _folder({"a.pdf": PDF}) as root:
+        client = _client(root)
+        for route in ("/receipts/skip", "/receipts/add"):
+            for ref in ("../../etc/passwd", "nope", ""):
+                assert client.post(route, json={"reference": ref}).status_code == 404, (route, ref)
+        assert [p.name for p in root.iterdir()] == ["a.pdf"]
+    assert svc.appends == []
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
