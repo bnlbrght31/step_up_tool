@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from PIL import Image, ImageDraw
+import pdfplumber
 
 from src import receipt_folder as rf
 
@@ -94,6 +95,85 @@ def test_find_receipt_matches_by_normalised_name_and_never_by_path():
         assert rf.find_receipt(root, "target_8-14-26").reference == "Target 8-14-26"
         assert rf.find_receipt(root, "../../etc/passwd") is None
         assert rf.find_receipt(root, "") is None
+
+
+# ---------------------------------------------------------------------------
+# Converting photos to PDF
+# ---------------------------------------------------------------------------
+
+# A PDF page's size in points for an image of `px` pixels at PDF_DPI.
+def _pts(px: int) -> int:
+    return round(px * 72 / rf.PDF_DPI)
+
+
+def _page_size(pdf_path: Path) -> tuple[int, int]:
+    with pdfplumber.open(pdf_path) as pdf:
+        page = pdf.pages[0]
+        return round(page.width), round(page.height)
+
+
+def _phone_photo() -> Image.Image:
+    """A 24 MP, 4284x5712 'photo' with noise, harder to compress than a real receipt."""
+    im = Image.effect_noise((4284, 5712), 12).point(lambda v: min(255, v + 90)).convert("RGB")
+    draw = ImageDraw.Draw(im)
+    for y in range(300, 5400, 90):
+        draw.rectangle([600, y, 600 + (y * 37) % 2800 + 400, y + 30], fill=(30, 30, 30))
+    return im
+
+
+def test_a_phone_photo_becomes_a_pdf_under_1_mb_with_a_2200px_long_edge():
+    with _folder({"IMG_1.jpeg": _phone_photo()}) as root:
+        pdf = rf.to_pdf(root / "IMG_1.jpeg")
+        assert pdf == root / "IMG_1.pdf"
+        assert pdf.stat().st_size < 1_000_000, f"{pdf.stat().st_size} bytes"
+        assert max(_page_size(pdf)) == _pts(2200)
+
+
+def test_phone_rotation_is_applied():
+    im = Image.new("RGB", (3000, 2000), "white")      # stored landscape
+    exif = Image.Exif()
+    exif[0x0112] = 6                                   # "rotate 90° to display": portrait
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", exif=exif)
+    with _folder({"IMG_2.jpeg": buf.getvalue()}) as root:
+        width, height = _page_size(rf.to_pdf(root / "IMG_2.jpeg"))
+    assert height > width
+    assert height == _pts(2200)
+
+
+def test_a_small_image_is_not_upscaled():
+    with _folder({"IMG_3.png": _photo(400, 300)}) as root:
+        assert _page_size(rf.to_pdf(root / "IMG_3.png")) == (_pts(400), _pts(300))
+
+
+def test_heic_and_uppercase_extensions_convert():
+    with _folder({"IMG_4.HEIC": _photo(), "IMG_5.JPG": _photo()}) as root:
+        for name, expected in (("IMG_4.HEIC", "IMG_4.pdf"), ("IMG_5.JPG", "IMG_5.pdf")):
+            pdf = rf.to_pdf(root / name)
+            assert pdf.name == expected
+            assert pdf.read_bytes().startswith(b"%PDF")
+
+
+def test_an_existing_pdf_is_never_overwritten():
+    with _folder({"IMG_6.jpeg": _photo(), "IMG_6.pdf": b"%PDF mine"}) as root:
+        try:
+            rf.to_pdf(root / "IMG_6.jpeg")
+        except rf.ConversionError:
+            pass
+        else:
+            raise AssertionError("expected ConversionError")
+        assert (root / "IMG_6.pdf").read_bytes() == b"%PDF mine"
+
+
+def test_a_corrupt_image_raises_and_leaves_no_pdf():
+    with _folder({"IMG_7.jpeg": b"not an image"}) as root:
+        try:
+            rf.to_pdf(root / "IMG_7.jpeg")
+        except rf.ConversionError as e:
+            assert "IMG_7.jpeg" in str(e)
+        else:
+            raise AssertionError("expected ConversionError")
+        assert not (root / "IMG_7.pdf").exists()
 
 
 if __name__ == "__main__":

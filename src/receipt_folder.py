@@ -12,7 +12,15 @@ count once.
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from PIL import Image, ImageOps
+
 from src.sheets_logger import normalize_reference
+
+try:  # HEIC/HEIF support; without it those photos fail conversion with a clear message
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    pass
 
 PDF_EXT = ".pdf"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif"}
@@ -114,3 +122,37 @@ def find_receipt(folder: Path, reference: str) -> Receipt | None:
         if receipt.status != "unsupported" and normalize_reference(receipt.reference) == key:
             return receipt
     return None
+
+
+# ---------------------------------------------------------------------------
+# Photo -> PDF
+# ---------------------------------------------------------------------------
+# A 24 MP phone photo of a receipt is ~4 MB; at a 2200 px long edge it is
+# ~480 KB and every line is still legible.
+MAX_EDGE = 2200
+JPEG_QUALITY = 75
+PDF_DPI = 200
+
+
+class ConversionError(Exception):
+    """An image couldn't be turned into a PDF."""
+
+
+def to_pdf(image_path: Path) -> Path:
+    """Write <stem>.pdf beside `image_path` and return its path.
+
+    Applies the phone's rotation, shrinks the long edge to MAX_EDGE (never
+    enlarging), and never overwrites an existing file.
+    """
+    out = image_path.with_suffix(PDF_EXT)
+    if out.exists():
+        raise ConversionError(f"{out.name} already exists")
+    try:
+        with Image.open(image_path) as im:
+            page = ImageOps.exif_transpose(im)
+            page.thumbnail((MAX_EDGE, MAX_EDGE))
+            page.convert("RGB").save(out, "PDF", quality=JPEG_QUALITY, resolution=PDF_DPI)
+    except Exception as e:
+        out.unlink(missing_ok=True)
+        raise ConversionError(f"Couldn't convert {image_path.name}: {e}") from e
+    return out
