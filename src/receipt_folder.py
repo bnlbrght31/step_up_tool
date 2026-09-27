@@ -181,3 +181,27 @@ def move_into(folder: Path, subfolder: str, paths: list[Path]) -> list[Path]:
         path.rename(dest)
         moved.append(dest)
     return moved
+
+
+# ---------------------------------------------------------------------------
+# Unsubmitted row from a parsed receipt
+# ---------------------------------------------------------------------------
+
+def row_from_parse(reference: str, items: list, reconciliation: dict | None) -> list[str]:
+    """The Unsubmitted row (UNSUBMITTED_HEADER order) for a receipt Claude has read.
+
+    With no items -- Claude couldn't read it -- only Order/Receipt # is filled.
+    """
+    if not items:
+        return ["", "", "", reference, "", "", ""]
+    first = items[0]
+    item = (first.description or "").strip()
+    if len(items) > 1:
+        item = f"{item} + {len(items) - 1} more".strip()
+    totals = reconciliation or {}
+    total = totals.get("grand_total")
+    if total is None:
+        total = totals.get("computed_total")
+    price = f"{float(total):.2f}" if total is not None else ""
+    return ["", item, (first.vendor or "").strip(), reference, price,
+            (first.purchase_date or "").strip(), ""]

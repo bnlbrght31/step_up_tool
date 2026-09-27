@@ -20,6 +20,7 @@ from PIL import Image, ImageDraw
 import pdfplumber
 
 from src import receipt_folder as rf
+from src.models import LineItem
 
 
 @contextmanager
@@ -195,6 +196,33 @@ def test_move_into_never_overwrites_a_file_already_there():
         assert moved.name == "IMG_1 (3).jpeg"
         assert moved.read_bytes() == b"new"
         assert (root / "Originals" / "IMG_1.jpeg").read_bytes() == b"old"
+
+
+# ---------------------------------------------------------------------------
+# Unsubmitted row from a parsed receipt
+# ---------------------------------------------------------------------------
+
+def _item(desc="Crayons", vendor="Walmart", date="07/23/2026"):
+    return LineItem(description=desc, vendor=vendor, purchase_date=date, cost=1.0)
+
+
+def test_row_uses_the_first_item_and_the_receipt_total():
+    row = rf.row_from_parse("IMG_1", [_item()], {"grand_total": 87.36, "computed_total": 87.35})
+    assert row == ["", "Crayons", "Walmart", "IMG_1", "87.36", "07/23/2026", ""]
+
+
+def test_row_counts_the_other_items():
+    row = rf.row_from_parse("IMG_1", [_item(), _item("Rulers"), _item("Notebook")], {"grand_total": 10})
+    assert row[1] == "Crayons + 2 more"
+
+
+def test_row_falls_back_to_the_computed_total():
+    row = rf.row_from_parse("IMG_1", [_item()], {"grand_total": None, "computed_total": 12.5})
+    assert row[4] == "12.50"
+
+
+def test_row_for_an_unread_receipt_has_only_the_reference():
+    assert rf.row_from_parse("IMG_1", [], None) == ["", "", "", "IMG_1", "", "", ""]
 
 
 if __name__ == "__main__":
