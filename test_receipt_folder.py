@@ -498,6 +498,51 @@ def test_the_remove_prompt_finds_a_row_staged_under_its_original_name():
     assert sheets_logger.find_unsubmitted_row(uploaded) is not None
 
 
+# ---------------------------------------------------------------------------
+# Skip and add racing on the same receipt
+# ---------------------------------------------------------------------------
+
+def test_a_skip_during_an_add_never_leaves_a_row_for_a_skipped_receipt():
+    """Not submitting clicked just before Add sends both requests at once (the
+    app serves requests on threads). Whichever wins, the receipt must not end up
+    both staged in the sheet and moved to Not submitting."""
+    import threading
+
+    svc = _sheet()
+    add_is_reading, release_add = threading.Event(), threading.Event()
+
+    def slow_parse(pdf):
+        add_is_reading.set()
+        release_add.wait(5)
+        return [_item()], 0.0, {"grand_total": 1.0}
+
+    with _folder({"a.pdf": PDF}) as root:
+        adding = _client(root, parse=slow_parse)
+        skipping = adding.application.test_client()
+        status = {}
+        adder = threading.Thread(target=lambda: status.setdefault(
+            "add", adding.post("/receipts/add", json={"reference": "a"}).status_code))
+        skipper = threading.Thread(target=lambda: status.setdefault(
+            "skip", skipping.post("/receipts/skip", json={"reference": "a"}).status_code))
+        adder.start()
+        assert add_is_reading.wait(5), "add never reached the receipt read"
+        skipper.start()
+        skipper.join(0.5)          # an unguarded skip completes in this window
+        release_add.set()
+        adder.join(5)
+        skipper.join(5)
+        skipped = (root / "Not submitting" / "a.pdf").exists()
+    staged = len(svc.appends) == 1
+    assert staged != skipped, f"staged={staged} skipped={skipped} {status}"
+
+
+def test_the_page_locks_a_row_before_its_skip_request_returns():
+    page = (TEMPLATES / "receipts.html").read_text()
+    skip_fn = page[page.index("async function skip("):page.index("async function addSelected(")]
+    assert skip_fn.index("lockRow(i)") < skip_fn.index("await post('/receipts/skip'")
+    assert "if (running || pendingSkips) return;" in page
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

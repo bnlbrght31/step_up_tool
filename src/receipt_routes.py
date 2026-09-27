@@ -6,6 +6,8 @@ agent. Both POST routes take a receipt *reference* and find its files by
 scanning the folder, so no request can reach a file outside it.
 """
 
+import functools
+import threading
 from pathlib import Path
 
 from flask import Blueprint, jsonify, render_template, request
@@ -15,6 +17,20 @@ from src import scholarship_year
 from src.sheets_logger import UNSUBMITTED_HEADER, append_unsubmitted, read_tracked_references
 
 bp = Blueprint("receipts", __name__)
+
+# Skip and add each read the sheet, then move files or append a row. The app
+# serves requests on threads, so without this a Not submitting clicked just
+# before Add could see the receipt untracked in both requests: the skip moves
+# the files away and the add still stages a row for it.
+_folder_lock = threading.Lock()
+
+
+def _one_at_a_time(view):
+    @functools.wraps(view)
+    def locked(*args, **kwargs):
+        with _folder_lock:
+            return view(*args, **kwargs)
+    return locked
 
 
 def receipts_folder() -> Path:
@@ -62,6 +78,7 @@ def receipts_review():
 
 
 @bp.route("/receipts/skip", methods=["POST"])
+@_one_at_a_time
 def receipts_skip():
     folder, receipt = _lookup()
     if receipt is None:
@@ -78,6 +95,7 @@ def receipts_skip():
 
 
 @bp.route("/receipts/add", methods=["POST"])
+@_one_at_a_time
 def receipts_add():
     folder, receipt = _lookup()
     if receipt is None:
