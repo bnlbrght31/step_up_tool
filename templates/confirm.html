@@ -181,14 +181,14 @@
     <div class="log-fields">
       <div>
         <label for="student-name">Student Name</label>
-        <input type="text" id="student-name" placeholder="e.g. Zechariah Albright" />
+        <input type="text" id="student-name" placeholder="Child's full name" />
       </div>
       <div>
         <label for="sufs-id">SUFS Reimbursement ID</label>
-        <input type="text" id="sufs-id" placeholder="e.g. 34405627" />
+        <input type="text" id="sufs-id" placeholder="From the SUFS confirmation page" />
       </div>
     </div>
-    <button class="btn btn-green" onclick="logToSheet()">Log to sheet</button>
+    <button class="btn btn-green" id="log-btn" onclick="logToSheet()">Log to sheet</button>
     <div id="log-status"></div>
 
     <div id="unsubmitted-panel">
@@ -414,6 +414,14 @@ async function logToSheet() {
 
   logStatus.style.display = 'none';
 
+  // A second click would log every line item twice, so the button stays off
+  // while the request runs and for good once it succeeds. The server refuses
+  // a repeat as well; this just keeps the click from happening.
+  const logBtn = document.getElementById('log-btn');
+  logBtn.disabled = true;
+  logBtn.textContent = 'Logging…';
+  let logged = false;
+
   try {
     const res = await fetch('/log-submission', {
       method: 'POST',
@@ -425,6 +433,7 @@ async function logToSheet() {
       logStatus.className = 'success'; logStatus.style.display = 'block';
       logStatus.textContent = `✓ ${data.logged} row(s) logged to sheet with IDs ${sufsId}-1 through ${sufsId}-${data.logged}.`;
       showUnsubmittedPrompt(data.unsubmitted);
+      logged = true;
     } else {
       logStatus.className = 'error'; logStatus.style.display = 'block';
       logStatus.textContent = 'Error: ' + (data.error || 'Unknown error');
@@ -432,6 +441,9 @@ async function logToSheet() {
   } catch (e) {
     logStatus.className = 'error'; logStatus.style.display = 'block';
     logStatus.textContent = 'Network error: ' + e.message;
+  } finally {
+    logBtn.disabled = logged;
+    logBtn.textContent = logged ? 'Logged ✓' : 'Log to sheet';
   }
 }
 

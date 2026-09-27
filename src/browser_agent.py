@@ -1,4 +1,4 @@
-"""
+r"""
 Browser automation for filling SUFS reimbursement forms.
 
 The SUFS form uses Bootstrap dropdowns (button + dropdown-menu with a.dropdown-item),

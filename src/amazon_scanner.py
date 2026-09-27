@@ -11,10 +11,13 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from src import scholarship_year
+from src.gmail import list_message_stubs
+
 SCAN_STATE_FILE = Path("scan_state.json")
-# Start of the current scholarship year (Jul 1 – Jun 30); used as the default
-# "scan from" date when no prior scan state exists. Bump each July at rollover.
-SCHOLARSHIP_START = "2026/07/01"
+# Start of the current scholarship year; the default "scan from" date when no
+# prior scan state exists.
+SCHOLARSHIP_START = scholarship_year.gmail_date(scholarship_year.start_year())
 
 GMAIL_TOKEN_FILE = "token.json"
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
@@ -244,8 +247,7 @@ def scan_return_emails(after_date: str) -> dict:
     returns: dict = {}
 
     for query in queries:
-        results = service.users().messages().list(userId="me", q=query, maxResults=500).execute()
-        for ref in results.get("messages", []):
+        for ref in list_message_stubs(service, query):
             try:
                 msg = service.users().messages().get(
                     userId="me", id=ref["id"], format="full"
@@ -431,10 +433,7 @@ def scan_amazon_orders(existing_order_numbers: set, from_date: str | None = None
     query = f'from:auto-confirm@amazon.com after:{after_date}'
 
     service = _get_gmail_service()
-    results = service.users().messages().list(
-        userId="me", q=query, maxResults=500
-    ).execute()
-    messages = results.get("messages", [])
+    messages = list_message_stubs(service, query)
 
     orders = []
     seen = set()

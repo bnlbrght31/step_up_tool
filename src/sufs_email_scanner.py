@@ -13,6 +13,8 @@ import os
 import re
 from datetime import datetime
 
+from src.gmail import list_message_stubs
+
 # SUFS sends from two address variants — approvals/on-hold use the hyphenated
 # "no-reply@sufs.org", while payment notifications come from the un-hyphenated
 # "noreply@sufs.org". Match both so direct-to-Gmail payment emails are caught
@@ -66,22 +68,6 @@ def _decode_body(msg) -> str:
     return _extract(msg.get("payload", {}))
 
 
-def _list_messages(service, query: str) -> list[dict]:
-    """Return all message stubs matching a Gmail query."""
-    messages = []
-    page_token = None
-    while True:
-        kwargs = {"userId": "me", "q": query, "maxResults": 500}
-        if page_token:
-            kwargs["pageToken"] = page_token
-        resp = service.users().messages().list(**kwargs).execute()
-        messages.extend(resp.get("messages", []))
-        page_token = resp.get("nextPageToken")
-        if not page_token:
-            break
-    return messages
-
-
 def _email_date(msg) -> str:
     """Return M/D/YYYY date from message headers."""
     headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
@@ -109,7 +95,7 @@ def scan_approved_emails(after_date: str = None) -> list[dict]:
         query += f" after:{after_date}"
 
     results = []
-    for stub in _list_messages(svc, query):
+    for stub in list_message_stubs(svc, query):
         msg = svc.users().messages().get(
             userId="me", id=stub["id"], format="full"
         ).execute()
@@ -153,7 +139,7 @@ def scan_paid_emails(after_date: str = None) -> list[dict]:
         query += f" after:{after_date}"
 
     results = []
-    for stub in _list_messages(svc, query):
+    for stub in list_message_stubs(svc, query):
         msg = svc.users().messages().get(
             userId="me", id=stub["id"], format="full"
         ).execute()
@@ -203,7 +189,7 @@ def scan_on_hold_emails(after_date: str = None) -> list[dict]:
         query += f" after:{after_date}"
 
     results = []
-    for stub in _list_messages(svc, query):
+    for stub in list_message_stubs(svc, query):
         msg = svc.users().messages().get(
             userId="me", id=stub["id"], format="full"
         ).execute()
@@ -246,7 +232,7 @@ def scan_remittance_emails(after_date: str = None) -> list[dict]:
         query += f" after:{after_date}"
 
     results = []
-    for stub in _list_messages(svc, query):
+    for stub in list_message_stubs(svc, query):
         msg = svc.users().messages().get(
             userId="me", id=stub["id"], format="full"
         ).execute()
@@ -315,100 +301,6 @@ def scan_remittance_emails(after_date: str = None) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Match emails → sheet rows
-# ---------------------------------------------------------------------------
-
-def build_status_updates(
-    approved: list[dict],
-    paid: list[dict],
-    sheet_rows: list[dict],
-    reimbursements_raw: list[dict] | None = None,
-    remittance: list[dict] | None = None,
-) -> list[dict]:
-    """
-    Match approval and payment emails to sheet rows via column K (reimbursement_id).
-
-    Returns list of {row_index, approved_date, paid_date, partial} dicts
-    (only rows that need updating are included).
-    """
-    # Index sheet rows by reimbursement_id → list[row]
-    by_id: dict[str, list[dict]] = {}
-    for row in sheet_rows:
-        rid = (row.get("reimbursement_id") or "").strip()
-        if rid:
-            by_id.setdefault(rid, []).append(row)
-
-    # Line item counts per reimbursement (for partial detection)
-    item_counts: dict[str, int] = {}
-    if reimbursements_raw:
-        for r in reimbursements_raw:
-            item_counts[r["id"]] = len(r.get("line_items", []))
-
-    updates: dict[int, dict] = {}  # row_index → update dict
-
-    def _ensure(row_index: int) -> dict:
-        if row_index not in updates:
-            updates[row_index] = {
-                "row_index": row_index,
-                "approved_date": "", "approved_partial": False,
-                "paid_date":     "", "paid_partial":     False,
-            }
-        return updates[row_index]
-
-    # --- Approved ---
-    # SUFS sends one approval email per line item, so count emails per top-level ID
-    # and compare against item_counts to detect partial approval.
-    from collections import defaultdict
-    approved_by_id: dict[str, list] = defaultdict(list)
-    for email in approved:
-        rid = (email.get("reimbursement_id") or "").strip()
-        if rid:
-            approved_by_id[rid].append(email)
-
-    for rid, emails in approved_by_id.items():
-        if rid not in by_id:
-            continue
-        total = item_counts.get(rid)
-        is_partial = bool(total and len(emails) < total)
-        # Use the most recent email date
-        latest_date = sorted(emails, key=lambda e: e["date"])[-1]["date"]
-        for row in by_id[rid]:
-            u = _ensure(row["row_index"])
-            u["approved_date"] = latest_date
-            u["approved_partial"] = is_partial
-
-    # --- Paid ---
-    for email in paid:
-        paid_items = set(email.get("line_items", []))
-        for rid in email.get("top_level_ids", []):
-            if rid not in by_id:
-                continue
-            total = item_counts.get(rid)
-            paid_count = sum(1 for li in paid_items if li.split("-")[0] == rid)
-            is_partial = bool(total and paid_count < total)
-            for row in by_id[rid]:
-                u = _ensure(row["row_index"])
-                u["paid_date"] = email["date"]
-                u["paid_partial"] = is_partial
-
-    # --- Remittance (treated same as paid) ---
-    for email in (remittance or []):
-        paid_items = set(email.get("line_items", []))
-        for rid in email.get("top_level_ids", []):
-            if rid not in by_id:
-                continue
-            total = item_counts.get(rid)
-            paid_count = sum(1 for li in paid_items if li.split("-")[0] == rid)
-            is_partial = bool(total and paid_count < total)
-            for row in by_id[rid]:
-                u = _ensure(row["row_index"])
-                u["paid_date"] = email["date"]
-                u["paid_partial"] = is_partial
-
-    return list(updates.values())
-
-
-# ---------------------------------------------------------------------------
 # Match emails → Testing tab rows (per-line-item structure)
 # ---------------------------------------------------------------------------
 
@@ -444,9 +336,9 @@ def build_testing_status_updates(
     sheet_rows: list[dict],
 ) -> list[dict]:
     """
-    Match emails to 2025-2026 Testing tab rows.
+    Match emails to Line Items tab rows.
 
-    Rows have sufs_reimb_id like '34405627-1' (line item ID).
+    Rows have sufs_reimb_id like '12345678-1' (line item ID).
     Approved/on-hold emails carry a top-level ID + amount:
       - Match by amount to identify the specific line item row.
       - Fall back to all rows for that top-level ID if no amount match.

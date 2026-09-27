@@ -24,8 +24,7 @@ from src.sufs_email_scanner import (
     build_testing_status_updates,
 )
 from src.sheets_logger import read_testing_rows, batch_write_testing_status
-
-AFTER_DATE = "2025/07/01"
+from src.status_scan import AFTER_DATE
 
 
 def main():

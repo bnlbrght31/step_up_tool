@@ -48,7 +48,7 @@ def _price(s) -> float:
 
 
 def _canon_child(name) -> str:
-    """Title-case so 'ZIon' and 'Zion' collapse to one child."""
+    """Title-case so 'SAM' and 'Sam' collapse to one child."""
     c = (name or "").strip()
     return c.title() if c else "(Unassigned)"
 

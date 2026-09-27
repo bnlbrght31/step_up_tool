@@ -11,18 +11,13 @@ Used by the /sufs-scan routes so the browser can show a preview and the user can
 confirm before any write (same safety as the CLI's y/N prompt).
 """
 
-import json
-import os
-
+from src import scholarship_year
 from src.sheets_logger import (
     LINE_ITEMS_TABS as TESTING_TABS,
-    batch_write_sufs_status,
     batch_write_testing_status,
-    read_all_rows,
     read_testing_rows,
 )
 from src.sufs_email_scanner import (
-    build_status_updates,
     build_testing_status_updates,
     scan_approved_emails,
     scan_on_hold_emails,
@@ -30,7 +25,9 @@ from src.sufs_email_scanner import (
     scan_remittance_emails,
 )
 
-AFTER_DATE = "2025/07/01"  # scholarship-year start — only look at emails from here on
+# Scan from the start of the first tracked year: every Line Items tab is read, so
+# a late payment on any of them must still be found.
+AFTER_DATE = scholarship_year.gmail_date(scholarship_year.FIRST_LINE_ITEMS_YEAR)
 
 
 def _row_by_index(rows, idx, tab=None):
@@ -40,68 +37,6 @@ def _row_by_index(rows, idx, tab=None):
          if r["row_index"] == idx and (tab is None or r.get("tab") == tab)),
         {},
     )
-
-
-# ---------------------------------------------------------------------------
-# Main tab (2025-2026): col L = SUFS Approve Date, col M = SUFS Paid Date
-# ---------------------------------------------------------------------------
-
-def preview_main(overwrite=False):
-    rows = read_all_rows()
-    approved = scan_approved_emails(after_date=AFTER_DATE)
-    paid = scan_paid_emails(after_date=AFTER_DATE)
-    remittance = scan_remittance_emails(after_date=AFTER_DATE)
-
-    reimbursements_raw = None
-    if os.path.exists("reimbursements_raw.json"):
-        try:
-            with open("reimbursements_raw.json") as f:
-                reimbursements_raw = json.load(f)
-        except Exception:
-            reimbursements_raw = None
-
-    updates = build_status_updates(approved, paid, rows, reimbursements_raw, remittance)
-
-    out = []
-    for u in updates:
-        row = _row_by_index(rows, u["row_index"])
-        appr = u.get("approved_date") or ""
-        pd = u.get("paid_date") or ""
-        if not overwrite:
-            if appr and row.get("sufs_approved_date", "").strip():
-                appr = ""
-            if pd and row.get("sufs_paid_date", "").strip():
-                pd = ""
-        if not appr and not pd:
-            continue
-        out.append({
-            "row_index": u["row_index"],
-            "approved_date": appr,
-            "paid_date": pd,
-            "approved_partial": bool(u.get("approved_partial")),
-            "paid_partial": bool(u.get("paid_partial")),
-            "id": row.get("reimbursement_id", ""),
-            "store": row.get("store", ""),
-            "item": (row.get("item", "") or "")[:60],
-        })
-    return {
-        "tab": "2025-2026",
-        "scanned": {"approved": len(approved), "paid": len(paid), "remittance": len(remittance)},
-        "updates": out,
-    }
-
-
-def apply_main(updates):
-    clean = [{
-        "row_index": int(u["row_index"]),
-        "approved_date": u.get("approved_date", "") or "",
-        "paid_date": u.get("paid_date", "") or "",
-        "approved_partial": bool(u.get("approved_partial")),
-        "paid_partial": bool(u.get("paid_partial")),
-    } for u in updates]
-    clean = [u for u in clean if u["approved_date"] or u["paid_date"]]
-    batch_write_sufs_status(clean)
-    return len(clean)
 
 
 # ---------------------------------------------------------------------------
@@ -168,11 +103,10 @@ def apply_testing(updates):
 
 
 # Dispatch by tab key used in the URL ----------------------------------------
-PREVIEW = {"main": preview_main, "testing": preview_testing}
-APPLY = {"main": apply_main, "testing": apply_testing}
+PREVIEW = {"testing": preview_testing}
+APPLY = {"testing": apply_testing}
 
 TAB_META = {
-    "main": {"title": "Main tab (2025-2026)", "cols": ["approved_date", "paid_date"]},
     "testing": {"title": "Line Items (" + " + ".join(TESTING_TABS) + ")",
                 "cols": ["status", "on_hold_date", "approved_date", "paid_date"]},
 }

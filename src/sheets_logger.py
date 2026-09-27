@@ -1,33 +1,29 @@
 """
-Google Sheets logging for SUFS Amazon order tracking.
+Google Sheets access for the SUFS tracking sheet: the Unsubmitted staging tab
+and one Line Items tab per scholarship year.
 Uses a service account (same credentials as the pickem app).
-
-Column order: Student | Item | Store | Order number | Price | Date Purchased | Status | ...
 """
 
 import os
 import re
 
+from src import scholarship_year
+
 SHEET_ID = os.environ.get("SUFS_SHEET_ID", "")
-TAB = "2025-2026"
 
 # --- Scholarship-year line-item tabs ---------------------------------------
-# The scholarship year runs Jul 1 – Jun 30. Each year's submitted line items go
-# to their own tab. LINE_ITEMS_TAB is the *active* year: the submission logger
-# always writes here (and auto-creates it on first submission).
-#
-# ROLLOVER (do this each July): point LINE_ITEMS_TAB at the new year's tab and
-# append that name to LINE_ITEMS_TABS.
-LINE_ITEMS_TAB = "2026-2027 Line Items"
+# Each scholarship year's submitted line items go to their own tab, named from
+# src/scholarship_year.py so the July rollover needs no edits here.
+# LINE_ITEMS_TAB is the active year: the submission logger always writes here
+# (and auto-creates it on first submission).
+LINE_ITEMS_TAB = scholarship_year.current_line_items_tab()
 
 # Every scholarship year's line-item tab, oldest → newest. The status scanner,
 # the Overview dashboard, and the order-dedup all read/write across ALL of these
 # so trailing approvals/payments on a prior year still land and the dashboard
 # reflects every active year. A tab that doesn't exist yet is skipped on read.
-LINE_ITEMS_TABS = ["2025-2026 Line Items", LINE_ITEMS_TAB]
+LINE_ITEMS_TABS = scholarship_year.all_line_items_tabs()
 
-# Back-compat alias for the active submission tab.
-TESTING_TAB = LINE_ITEMS_TAB
 # The Amazon scanner stages NOT-yet-submitted orders here, one row per order
 # (SUFS line-item IDs don't exist until a reimbursement is submitted). Shared
 # across years — staged purchases aren't year-specific until they're submitted.
@@ -47,7 +43,7 @@ UNSUBMITTED_HEADER = [
     "Student", "Item", "Store", "Order/Receipt #", "Price", "Date Purchased", "Status",
 ]
 
-# Columns for TESTING_TAB:
+# Columns of every Line Items tab:
 # A: Student | B: Item | C: Store | D: Invoice | E: Price | F: Purchase date
 # G: Status | H: SUFS Reimbursement ID | I: Date submitted
 # J: Date on hold | K: Date approved | L: Date paid
@@ -96,132 +92,6 @@ def get_existing_order_numbers() -> set:
     return seen
 
 
-def read_all_rows() -> list[dict]:
-    """
-    Read all data rows from the 2025-2026 tab.
-    Returns list of dicts with keys matching column headers + row_index (1-based, skipping header).
-    """
-    try:
-        svc = _get_service()
-        result = svc.spreadsheets().values().get(
-            spreadsheetId=SHEET_ID,
-            range=f"{TAB}!A1:M500",
-        ).execute()
-        rows = result.get("values", [])
-        if not rows:
-            return []
-        header = rows[0]
-        keys = ["student", "item", "store", "order_number", "price",
-                "date_purchased", "status", "date_submitted", "date_reimbursed",
-                "date_paid", "reimbursement_id", "sufs_approved_date", "sufs_paid_date"]
-        data = []
-        for i, row in enumerate(rows[1:], start=2):  # row 2 = first data row
-            padded = row + [""] * (len(keys) - len(row))
-            data.append({k: padded[j] for j, k in enumerate(keys)} | {"row_index": i})
-        return data
-    except Exception as e:
-        print(f"[sheets] Error reading rows: {e}")
-        return []
-
-
-def write_reimbursement_id(row_index: int, reimb_id: str):
-    """Write a reimbursement ID to column K of the given row."""
-    batch_write_reimbursement_ids({row_index: reimb_id})
-
-
-def batch_write_reimbursement_ids(row_to_id: dict[int, str]):
-    """Write multiple reimbursement IDs to column K in a single API call."""
-    if not row_to_id:
-        return
-    import time
-    CHUNK = 50
-    items = list(row_to_id.items())
-    try:
-        svc = _get_service()
-        for i in range(0, len(items), CHUNK):
-            chunk = items[i:i + CHUNK]
-            svc.spreadsheets().values().batchUpdate(
-                spreadsheetId=SHEET_ID,
-                body={
-                    "valueInputOption": "RAW",
-                    "data": [
-                        {"range": f"{TAB}!K{row_index}", "values": [[reimb_id]]}
-                        for row_index, reimb_id in chunk
-                    ],
-                },
-            ).execute()
-            if i + CHUNK < len(items):
-                time.sleep(1.2)
-    except Exception as e:
-        print(f"[sheets] Error batch-writing reimbursement IDs: {e}")
-        raise
-
-
-def batch_write_sufs_status(updates: list[dict]):
-    """
-    Write SUFS approved/paid dates to columns L and M.
-    Each update: {row_index, approved_date, paid_date}  (empty string = skip)
-    Single API call for all rows.
-    """
-    if not updates:
-        return
-    data = []
-    for u in updates:
-        row = u["row_index"]
-        if u.get("approved_date"):
-            label = f"Partial ({u['approved_date']})" if u.get("approved_partial") else u["approved_date"]
-            data.append({"range": f"{TAB}!L{row}", "values": [[label]]})
-        if u.get("paid_date"):
-            label = f"Partial ({u['paid_date']})" if u.get("paid_partial") else u["paid_date"]
-            data.append({"range": f"{TAB}!M{row}", "values": [[label]]})
-    if not data:
-        return
-    import time
-    CHUNK = 50
-    try:
-        svc = _get_service()
-        for i in range(0, len(data), CHUNK):
-            chunk = data[i:i + CHUNK]
-            svc.spreadsheets().values().batchUpdate(
-                spreadsheetId=SHEET_ID,
-                body={"valueInputOption": "RAW", "data": chunk},
-            ).execute()
-            if i + CHUNK < len(data):
-                time.sleep(1.2)
-    except Exception as e:
-        print(f"[sheets] Error writing SUFS status: {e}")
-        raise
-
-
-def append_order(order: dict):
-    """
-    Append one row to the 2025-2026 tab.
-    Columns A-G: Student | Item | Store | Order number | Price | Date Purchased | Status
-    Student and Status are left blank for manual entry.
-    """
-    row = [
-        "",                              # A: Student (fill in manually)
-        order.get("description", ""),   # B: Item
-        "Amazon",                        # C: Store
-        order.get("order_number", ""),  # D: Order number
-        order.get("total", ""),         # E: Price
-        order.get("purchase_date", ""), # F: Date Purchased
-        "",                              # G: Status (fill in manually)
-    ]
-    try:
-        create_tab(UNSUBMITTED_TAB, UNSUBMITTED_HEADER)  # no-op if it already exists
-        svc = _get_service()
-        svc.spreadsheets().values().append(
-            spreadsheetId=SHEET_ID,
-            range=f"{UNSUBMITTED_TAB}!A1",
-            valueInputOption="RAW",
-            body={"values": [row]},
-        ).execute()
-    except Exception as e:
-        print(f"[sheets] Error appending row: {e}")
-        raise
-
-
 def append_orders(orders: list):
     """Append multiple orders in a single API call."""
     if not orders:
@@ -253,8 +123,22 @@ def append_orders(orders: list):
 
 
 # ---------------------------------------------------------------------------
-# 2025-2026 Testing tab — per-line-item tracking
+# Line Items tabs — per-line-item tracking
 # ---------------------------------------------------------------------------
+
+class AlreadyLoggedError(ValueError):
+    """A SUFS reimbursement has already been logged to a Line Items tab."""
+
+
+def _is_logged(sufs_id: str) -> bool:
+    """True if any Line Items tab already holds a line item of this reimbursement.
+
+    Line item IDs are "<sufs_id>-<n>". Matching the whole pattern keeps "1000000"
+    from colliding with an existing "10000001-1".
+    """
+    pattern = re.compile(rf"{re.escape(sufs_id.strip())}-\d+")
+    return any(pattern.fullmatch(r["sufs_reimb_id"].strip()) for r in read_testing_rows())
+
 
 def log_submission_to_testing(student: str, sufs_id: str, items: list[dict], invoice_filename: str):
     """
@@ -263,7 +147,14 @@ def log_submission_to_testing(student: str, sufs_id: str, items: list[dict], inv
     submission of the year.
     items: list of item dicts with cost, tax, description, vendor, purchase_date.
     Price = cost + tax.
+
+    Raises AlreadyLoggedError, writing nothing, if this reimbursement is already
+    in any year's tab -- logging it again would duplicate every line item.
     """
+    if _is_logged(sufs_id):
+        raise AlreadyLoggedError(
+            f"Reimbursement {sufs_id} is already logged to the sheet; nothing was added."
+        )
     from datetime import date as _date
     today = _date.today().strftime("%m/%d/%Y")
     rows = []
@@ -311,7 +202,7 @@ def read_testing_rows() -> list[dict]:
         try:
             rows = svc.spreadsheets().values().get(
                 spreadsheetId=SHEET_ID,
-                range=f"{tab}!A1:L500",
+                range=f"{tab}!A:L",
             ).execute().get("values", [])
         except Exception as e:
             print(f"[sheets] Error reading {tab} rows: {e}")

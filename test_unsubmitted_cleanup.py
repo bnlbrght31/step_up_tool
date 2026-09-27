@@ -10,110 +10,13 @@ These run against a fake Sheets service, so they never touch the live workbook.
 Run: python test_unsubmitted_cleanup.py   (or: pytest test_unsubmitted_cleanup.py)
 """
 
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from fake_sheets import FakeSheets
 from src import sheets_logger
-
-
-# ---------------------------------------------------------------------------
-# Fake Sheets service
-# ---------------------------------------------------------------------------
-
-class _Exec:
-    def __init__(self, result):
-        self._result = result
-
-    def execute(self):
-        return self._result
-
-
-def _col_index(letters: str) -> int:
-    n = 0
-    for ch in letters:
-        n = n * 26 + (ord(ch) - ord("A") + 1)
-    return n - 1
-
-
-class FakeSheets:
-    """Minimal stand-in for the googleapiclient Sheets resource.
-
-    Mimics the real API's habit of omitting trailing empty cells, so callers
-    that forget to pad short rows will fail here the way they would in prod.
-    """
-
-    def __init__(self, tabs: dict):
-        self.tabs = tabs
-        self.batch_requests = []   # spreadsheets().batchUpdate requests
-        self.appends = []          # (tab, rows)
-        self.updates = []          # (range, values)
-
-    # -- api surface --------------------------------------------------------
-    def spreadsheets(self):
-        return self
-
-    def values(self):
-        return self
-
-    def _parse(self, rng: str):
-        tab, _, spec = rng.partition("!")
-        tab = tab.strip("'")
-        m = re.match(r"([A-Z]+)(\d*)(?::([A-Z]+)(\d*))?$", spec)
-        start = _col_index(m.group(1))
-        end = _col_index(m.group(3)) if m.group(3) else start
-        row = int(m.group(2)) if m.group(2) and not m.group(3) else None
-        return tab, start, end, row
-
-    def get(self, spreadsheetId=None, range=None, **kw):
-        if range is None:  # spreadsheet metadata
-            return _Exec({"sheets": [
-                {"properties": {"sheetId": i, "title": t}}
-                for i, t in enumerate(self.tabs)
-            ]})
-        tab, start, end, _row = self._parse(range)
-        if tab not in self.tabs:
-            raise RuntimeError(f"no such tab: {tab}")
-        out = []
-        for r in self.tabs[tab]:
-            padded = list(r) + [""] * (end + 1 - len(r))
-            sliced = padded[start:end + 1]
-            while sliced and sliced[-1] == "":  # API drops trailing blanks
-                sliced.pop()
-            out.append(sliced)
-        return _Exec({"values": out})
-
-    def append(self, spreadsheetId=None, range=None, body=None, **kw):
-        tab, *_ = self._parse(range)
-        self.appends.append((tab, body["values"]))
-        self.tabs.setdefault(tab, []).extend(body["values"])
-        return _Exec({})
-
-    def update(self, spreadsheetId=None, range=None, body=None, **kw):
-        tab, start, end, row = self._parse(range)
-        self.updates.append((range, body["values"]))
-        target = self.tabs[tab][row - 1]
-        while len(target) <= start:
-            target.append("")
-        target[start] = body["values"][0][0]
-        return _Exec({})
-
-    def batchUpdate(self, spreadsheetId=None, body=None, **kw):
-        if "requests" in body:
-            self.batch_requests.extend(body["requests"])
-            for req in body["requests"]:
-                if "deleteDimension" in req:
-                    rng = req["deleteDimension"]["range"]
-                    title = [t for i, t in enumerate(self.tabs)
-                             if i == rng["sheetId"]][0]
-                    del self.tabs[title][rng["startIndex"]:rng["endIndex"]]
-        return _Exec({})
-
-    # -- assertions helper --------------------------------------------------
-    def deletions(self):
-        return [r for r in self.batch_requests if "deleteDimension" in r]
 
 
 UNSUBMITTED_HEADER = ["Student", "Item", "Store", "Order/Receipt #", "Price",
@@ -211,9 +114,9 @@ def test_find_does_not_match_on_a_partial_reference():
 
 
 def test_find_unsubmitted_row_reads_back_an_existing_partial_note():
-    _fake(status="partial: Zechariah 34405627 (09/05)")
+    _fake(status="partial: Alex 10000001 (09/05)")
     row = sheets_logger.find_unsubmitted_row(TARGET)
-    assert row["status"] == "partial: Zechariah 34405627 (09/05)"
+    assert row["status"] == "partial: Alex 10000001 (09/05)"
 
 
 # ---------------------------------------------------------------------------
@@ -256,32 +159,32 @@ def test_delete_is_a_noop_when_order_is_already_gone():
 
 def test_mark_partial_stamps_the_status_column():
     svc = _fake()
-    note = sheets_logger.mark_unsubmitted_partial(TARGET, "Zechariah", "34405627")
-    assert note.startswith("partial: Zechariah 34405627")
+    note = sheets_logger.mark_unsubmitted_partial(TARGET, "Alex", "10000001")
+    assert note.startswith("partial: Alex 10000001")
     assert svc.tabs["Unsubmitted"][2][6] == note
     assert svc.deletions() == [], "keeping a row must never delete it"
 
 
 def test_mark_partial_appends_a_second_child():
     svc = _fake()
-    sheets_logger.mark_unsubmitted_partial(TARGET, "Zechariah", "34405627")
-    note = sheets_logger.mark_unsubmitted_partial(TARGET, "Zion", "34405630")
-    assert "Zechariah 34405627" in note
-    assert "Zion 34405630" in note
+    sheets_logger.mark_unsubmitted_partial(TARGET, "Alex", "10000001")
+    note = sheets_logger.mark_unsubmitted_partial(TARGET, "Sam", "10000002")
+    assert "Alex 10000001" in note
+    assert "Sam 10000002" in note
     assert note.count("partial:") == 2
 
 
 def test_mark_partial_does_not_duplicate_the_same_submission():
     """Re-clicking 'Keep it' for the same child must not stack up notes."""
     _fake()
-    first = sheets_logger.mark_unsubmitted_partial(TARGET, "Zechariah", "34405627")
-    again = sheets_logger.mark_unsubmitted_partial(TARGET, "Zechariah", "34405627")
+    first = sheets_logger.mark_unsubmitted_partial(TARGET, "Alex", "10000001")
+    again = sheets_logger.mark_unsubmitted_partial(TARGET, "Alex", "10000001")
     assert again == first
 
 
 def test_mark_partial_is_a_noop_when_order_is_absent():
     svc = _fake()
-    assert sheets_logger.mark_unsubmitted_partial("111-0000000-0000000", "Zion", "1") == ""
+    assert sheets_logger.mark_unsubmitted_partial("111-0000000-0000000", "Sam", "1") == ""
     assert svc.updates == []
 
 
@@ -298,7 +201,7 @@ def test_logging_a_submission_never_touches_the_unsubmitted_tab():
     svc = _fake()
     before = [list(r) for r in svc.tabs["Unsubmitted"]]
     sheets_logger.log_submission_to_testing(
-        "Zechariah", "34405627",
+        "Alex", "10000001",
         [{"cost": "45.99", "tax": "0", "description": "TMNT Michelangelo",
           "vendor": "Amazon", "purchase_date": "06/09/2026"}],
         f"{TARGET}.pdf",
@@ -337,7 +240,7 @@ def test_log_submission_reports_the_staged_order_for_confirmation():
     with c.session_transaction() as s:
         s["invoice_filename"] = f"{TARGET}.pdf"
     r = c.post("/log-submission", json={
-        "student": "Zechariah", "sufs_id": "34405627",
+        "student": "Alex", "sufs_id": "10000001",
         "items": [{"include": True, "cost": "45.99", "tax": "0",
                    "description": "TMNT", "vendor": "Amazon",
                    "purchase_date": "06/09/2026"}],
@@ -354,7 +257,7 @@ def test_log_submission_reports_nothing_for_an_unmatched_receipt():
     with c.session_transaction() as s:
         s["invoice_filename"] = "target-receipt.pdf"
     r = c.post("/log-submission", json={
-        "student": "Zion", "sufs_id": "34405630",
+        "student": "Sam", "sufs_id": "10000002",
         "items": [{"include": True, "cost": "10", "tax": "0",
                    "description": "x", "vendor": "Target", "purchase_date": "01/01/2026"}],
     })
@@ -412,7 +315,7 @@ def test_log_submission_reports_a_staged_non_amazon_receipt():
     with c.session_transaction() as s:
         s["invoice_filename"] = "Target_8-14-26.pdf"
     r = c.post("/log-submission", json={
-        "student": "Zion", "sufs_id": "34405630",
+        "student": "Sam", "sufs_id": "10000002",
         "items": [{"include": True, "cost": "154.41", "tax": "0",
                    "description": "School supplies", "vendor": "Target",
                    "purchase_date": "08/14/2026"}],
@@ -424,8 +327,8 @@ def test_keep_route_stamps_the_status_and_keeps_the_row():
     svc = _fake()
     main, c = _client()
     r = c.post("/unsubmitted/mark", json={
-        "order_number": TARGET, "student": "Zechariah", "sufs_id": "34405627"})
-    assert "Zechariah 34405627" in r.get_json()["status"]
+        "order_number": TARGET, "student": "Alex", "sufs_id": "10000001"})
+    assert "Alex 10000001" in r.get_json()["status"]
     assert TARGET in [row[3] for row in svc.tabs["Unsubmitted"][1:]]
     assert svc.deletions() == []
 

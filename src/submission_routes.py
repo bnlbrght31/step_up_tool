@@ -12,6 +12,7 @@ child and only the user knows when the last one is done.
 from flask import Blueprint, jsonify, request, session
 
 from src.sheets_logger import (
+    AlreadyLoggedError,
     delete_unsubmitted_row,
     find_unsubmitted_row,
     log_submission_to_testing,
@@ -37,6 +38,8 @@ def log_submission():
     invoice_filename = session.get("invoice_filename", "")
     try:
         log_submission_to_testing(student, sufs_id, items, invoice_filename)
+    except AlreadyLoggedError as e:
+        return jsonify({"error": str(e)}), 409
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

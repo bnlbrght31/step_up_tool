@@ -198,7 +198,7 @@ year) with:
 - All item details (description, vendor, price with tax, purchase date, invoice filename)
 - Status set to `submitted`
 - Today's date in Date Submitted
-- Line item IDs like `34405627-1`, `34405627-2`, etc.
+- Line item IDs like `12345678-1`, `12345678-2`, etc.
 
 ### Step 10 — Clear the order out of Unsubmitted
 
@@ -302,17 +302,18 @@ The scholarship year runs **July 1 – June 30**. Each year's submitted line ite
 live in their own tab (e.g. `2025-2026 Line Items`, `2026-2027 Line Items`). The
 shared **`Unsubmitted`** staging tab carries over — it isn't year-specific.
 
-When a new year starts, make these changes (all one-liners):
+Nothing needs editing when a new year starts — every year-specific name and date
+comes from `src/scholarship_year.py`, which works out the current year from
+today's date. After July 1 (and an app restart):
 
-1. **`src/sheets_logger.py`** — point `LINE_ITEMS_TAB` at the new year's tab name
-   and add that name to the `LINE_ITEMS_TABS` list. New submissions go to the new
-   tab (auto-created on first submission); the status scanner and Overview keep
-   reading every tab in the list, so late approvals/payments on the prior year
-   still land and the dashboard reflects both years.
-2. **`src/pdf_downloader.py`** — bump `OUTPUT_DIR` to `~/Desktop/SUFS/<new-year>/`.
-3. **`src/amazon_scanner.py`** — bump `SCHOLARSHIP_START` to July 1 of the new year.
+- New submissions log to the new year's tab, created on its first submission.
+- The status scanner and Overview keep reading every year's tab, so late
+  approvals and payments on the prior year still land.
+- The Amazon scanner's default start date and the invoice download folder
+  (`~/Desktop/SUFS/<year>/`) move to the new year.
 
-That's it — everything else derives from those constants.
+The one fixed value is `FIRST_LINE_ITEMS_YEAR` (2025): the older `2024-25` tab uses
+a different layout and the app never reads it.
 
 ---
 
