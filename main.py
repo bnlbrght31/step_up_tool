@@ -18,12 +18,16 @@ from src.option_match import build_matches
 from src.pdf_downloader import download_invoices
 from src.receipt_parser import parse_receipt
 from src.sheets_logger import append_orders, get_existing_order_numbers
+from src import scholarship_year
 from src.submission_routes import bp as submission_bp
 from src.receipt_routes import bp as receipts_bp
 from src.note_routes import bp as notes_bp
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+
+# Year labels and dates for every page (no template hardcodes a year).
+app.context_processor(scholarship_year.template_context)
 
 # /log-submission and the Unsubmitted cleanup routes.
 app.register_blueprint(submission_bp)

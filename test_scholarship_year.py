@@ -79,6 +79,32 @@ def test_invoice_downloader_saves_into_the_receipts_folder():
     assert pdf_downloader.OUTPUT_DIR == sy.receipts_folder()
 
 
+def test_pages_get_their_year_values_from_the_shared_setting():
+    assert sy.template_context(date(2026, 9, 26)) == {
+        "scholarship_year_label": "2026–2027",
+        "line_items_tab": "2026-2027 Line Items",
+        "scholarship_start": "07/01/2026",
+    }
+    assert sy.template_context(date(2027, 7, 1))["scholarship_start"] == "07/01/2027"
+
+
+def test_no_page_hardcodes_a_year():
+    """Years in page text go stale every July; they must come from template_context."""
+    import re
+    templates = Path(__file__).parent / "templates"
+    stale = [f"{page.name}:{n}: {line.strip()}"
+             for page in sorted(templates.glob("*.html"))
+             for n, line in enumerate(page.read_text().splitlines(), 1)
+             if re.search(r"\b20\d\d\b", line)
+             and "placeholder=" not in line and "fonts.googleapis" not in line]
+    assert not stale, "hardcoded years:\n  " + "\n  ".join(stale)
+
+
+def test_the_app_hands_the_year_values_to_every_page():
+    main_py = (Path(__file__).parent / "main.py").read_text()
+    assert "app.context_processor(scholarship_year.template_context)" in main_py
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

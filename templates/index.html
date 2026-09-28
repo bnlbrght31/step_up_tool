@@ -289,7 +289,7 @@
     <section class="intake reveal d3">
       <div class="docket">
         <span>Receipt intake</span>
-        <span class="no">FY 2026–2027</span>
+        <span class="no">FY {{ scholarship_year_label }}</span>
       </div>
       <form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
         <label class="dropzone" for="receipt-input" id="dropzone">
@@ -395,7 +395,7 @@
       </div>
     </details>
 
-    <p class="colophon reveal d5">Never submits for you · logs to <b>2026–2027 Line Items</b></p>
+    <p class="colophon reveal d5">Never submits for you · logs to <b>{{ line_items_tab }}</b></p>
   </main>
 
   <script>

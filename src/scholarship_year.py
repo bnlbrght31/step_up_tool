@@ -58,3 +58,16 @@ def all_line_items_tabs(today: date | None = None) -> list[str]:
     doesn't exist yet is skipped on read.
     """
     return [line_items_tab(y) for y in range(FIRST_LINE_ITEMS_YEAR, start_year(today) + 1)]
+
+
+def template_context(today: date | None = None) -> dict:
+    """Year values for the pages, so no template hardcodes a year.
+
+    Registered as a Flask context processor, so every page can use them.
+    """
+    year = start_year(today)
+    return {
+        "scholarship_year_label": label(year).replace("-", "–"),
+        "line_items_tab": line_items_tab(year),
+        "scholarship_start": f"07/01/{year}",
+    }
