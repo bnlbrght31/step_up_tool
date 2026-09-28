@@ -189,7 +189,10 @@ Click **Fill Form**. Switch to your SUFS Chrome window and watch it fill in the 
 After SUFS shows the confirmation page with your reimbursement ID:
 
 1. Switch back to the app — a **Log Submission to Sheet** panel will have appeared
-2. Enter the **student name** and the **SUFS Reimbursement ID** from the confirmation page
+2. Pick the child — one button per child saved on the **Students** page, or
+   **Other…** to type a name — and enter the **SUFS Reimbursement ID** from the
+   confirmation page. A typed name that matches a saved child (in any
+   capitalization) is logged with the saved spelling.
 3. Click **Log to Sheet**
 
 This writes one row per line item to the current scholarship year's Line Items
@@ -286,10 +289,16 @@ earlier submission. **Download note (PDF)** saves a one-page note naming each
 earlier submission's child, SUFS student ID, reimbursement ID and items. Attach
 it to the new submission alongside the receipt.
 
-Enter each child's SUFS student ID once on the **Students** page (home page →
+Enter each child's SUFS student ID on the **Students** page (home page →
 Students). The IDs are saved on this computer only, in `students.json`, which is
 git-ignored. A child with no saved ID shows as "not on file" in the note until
 you add it.
+
+**SUFS issues new student IDs every scholarship year**, so the page edits the
+current year's IDs and keeps earlier years'. After July 1 it asks for any new
+IDs that haven't been entered yet. A note uses each earlier submission's ID from
+the year it was submitted, so a June submission keeps last year's ID even after
+the rollover.
 
 The earlier submission is found by the receipt's file name, so upload the same
 file each time.

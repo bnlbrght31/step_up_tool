@@ -92,6 +92,7 @@ def test_the_route_reports_a_duplicate_log_as_a_conflict():
 
     temp_folder = Path(tempfile.mkdtemp())       # never the real receipts folder
     submission_routes.receipts_folder = lambda: temp_folder
+    submission_routes.students_file = lambda: temp_folder / "students.json"
     svc = _fake(current_rows=[_logged_row("10000001-1")])
     app = Flask(__name__)
     app.secret_key = "test"

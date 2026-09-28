@@ -20,7 +20,7 @@ from werkzeug.utils import secure_filename
 
 from fake_sheets import FakeSheets
 from src import receipt_folder as rf
-from src import sheets_logger, submission_routes
+from src import sheets_logger, students, submission_routes
 
 ITEM = {"include": True, "cost": "20.00", "tax": "1.40", "description": "Workbook",
         "vendor": "Target", "purchase_date": "08/14/2026"}
@@ -46,8 +46,14 @@ def _folder(*names) -> Path:
 
 
 def _client(folder, invoice):
-    """A client for the submission routes, with `invoice` as the uploaded receipt."""
+    """A client for the submission routes, with `invoice` as the uploaded receipt.
+
+    Both the receipts folder and the Students settings file are temporary, so
+    no test reaches the real receipts or reads the real student list.
+    """
     submission_routes.receipts_folder = lambda: folder
+    no_students = Path(tempfile.mkdtemp()) / "students.json"
+    submission_routes.students_file = lambda: no_students
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(submission_routes.bp)
@@ -173,6 +179,47 @@ def test_keep_leaves_the_receipt_for_the_next_childs_upload():
     client.post("/unsubmitted/mark", json={"order_number": "IMG_8", "student": "Sam",
                                            "sufs_id": "10000001"})
     assert _top_level(folder) == ["IMG_8.pdf"] and _submitted(folder) == []
+
+
+# ---------------------------------------------------------------------------
+# Student spelling
+# ---------------------------------------------------------------------------
+
+def _saved_students(*names):
+    """Save `names` as the children in a temporary Students file the routes will read."""
+    path = Path(tempfile.mkdtemp()) / "students.json"
+    students.save_students([{"name": n, "student_id": ""} for n in names], path)
+    submission_routes.students_file = lambda: path
+
+
+def test_logging_uses_the_saved_spelling_of_a_childs_name():
+    svc = _sheet()
+    client = _client(_folder(), "IMG_9.pdf")
+    _saved_students("Sam")
+    client.post("/log-submission", json={"student": "sAm", "sufs_id": "10000001", "items": [ITEM]})
+    assert svc.tabs[sheets_logger.LINE_ITEMS_TAB][-1][0] == "Sam"
+
+
+def test_logging_keeps_a_name_that_isnt_saved_as_typed():
+    svc = _sheet()
+    client = _client(_folder(), "IMG_9.pdf")
+    _saved_students("Sam")
+    client.post("/log-submission", json={"student": "Casey", "sufs_id": "10000001", "items": [ITEM]})
+    assert svc.tabs[sheets_logger.LINE_ITEMS_TAB][-1][0] == "Casey"
+
+
+def test_the_keep_stamp_uses_the_saved_spelling():
+    _sheet(staged=["IMG_10"])
+    client = _client(_folder("IMG_10.pdf"), "IMG_10.pdf")
+    _saved_students("Sam")
+    data = client.post("/unsubmitted/mark", json={"order_number": "IMG_10", "student": "SAM",
+                                                  "sufs_id": "10000001"}).get_json()
+    assert data["status"].startswith("partial: Sam 10000001")
+
+
+def test_route_tests_never_read_the_real_students_file():
+    _client(_folder(), "IMG_9.pdf")
+    assert submission_routes.students_file() != students.STUDENTS_FILE
 
 
 # ---------------------------------------------------------------------------

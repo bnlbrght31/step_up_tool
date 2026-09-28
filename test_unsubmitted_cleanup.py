@@ -232,6 +232,8 @@ def _client():
     # at an empty temporary one so no test can reach the real receipts.
     temp_folder = Path(tempfile.mkdtemp())
     submission_routes.receipts_folder = lambda: temp_folder
+    no_students = temp_folder / "students.json"      # never the real student list
+    submission_routes.students_file = lambda: no_students
     app = Flask(__name__, template_folder="../templates")
     app.secret_key = "test"
     app.config["TESTING"] = True

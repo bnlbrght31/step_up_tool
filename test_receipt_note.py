@@ -33,12 +33,16 @@ def _tmp_settings():
 # Student IDs
 # ---------------------------------------------------------------------------
 
-def test_students_round_trip_through_the_settings_file():
+Y26, Y27 = "2026-2027", "2027-2028"      # SUFS student IDs change every scholarship year
+
+
+def test_students_round_trip_with_ids_kept_per_year():
     path = _tmp_settings()
-    students.save_students([{"name": "Sam", "student_id": "1234567"},
-                            {"name": "Alex", "student_id": ""}], path)
-    assert students.load_students(path) == [{"name": "Sam", "student_id": "1234567"},
-                                            {"name": "Alex", "student_id": ""}]
+    view = students.save_students([{"name": "Sam", "student_id": "1234567"},
+                                   {"name": "Alex", "student_id": ""}], path, year=Y26)
+    assert view == [{"name": "Sam", "student_id": "1234567"}, {"name": "Alex", "student_id": ""}]
+    assert students.load_students(path) == [{"name": "Sam", "ids": {Y26: "1234567"}},
+                                            {"name": "Alex", "ids": {}}]
 
 
 def test_no_settings_file_means_no_students():
@@ -48,27 +52,64 @@ def test_no_settings_file_means_no_students():
 def test_blank_rows_are_dropped_and_values_trimmed():
     path = _tmp_settings()
     students.save_students([{"name": "  Sam ", "student_id": " 1234567 "},
-                            {"name": "", "student_id": ""}], path)
-    assert students.load_students(path) == [{"name": "Sam", "student_id": "1234567"}]
+                            {"name": "", "student_id": ""}], path, year=Y26)
+    assert students.load_students(path) == [{"name": "Sam", "ids": {Y26: "1234567"}}]
 
 
 def test_the_same_child_twice_is_refused():
     try:
         students.save_students([{"name": "Sam", "student_id": "1"},
-                                {"name": "sam", "student_id": "2"}], _tmp_settings())
+                                {"name": "sam", "student_id": "2"}], _tmp_settings(), year=Y26)
     except ValueError as e:
         assert "Sam" in str(e) or "sam" in str(e)
     else:
         raise AssertionError("expected ValueError for a duplicate name")
 
 
-def test_student_id_lookup_ignores_capitalisation_and_spacing():
+def test_student_id_lookup_is_per_year_and_ignores_capitalisation():
     path = _tmp_settings()
-    students.save_students([{"name": "Sam", "student_id": "1234567"}], path)
+    students.save_students([{"name": "Sam", "student_id": "1234567"}], path, year=Y26)
     listed = students.load_students(path)
-    assert students.student_id_for("SAm", listed) == "1234567"
-    assert students.student_id_for(" sam ", listed) == "1234567"
-    assert students.student_id_for("Alex", listed) == ""
+    assert students.student_id_for("SAm", listed, Y26) == "1234567"
+    assert students.student_id_for(" sam ", listed, Y26) == "1234567"
+    assert students.student_id_for("Sam", listed, Y27) == ""
+    assert students.student_id_for("Alex", listed, Y26) == ""
+
+
+def test_saving_a_new_years_ids_keeps_the_earlier_years():
+    """Notes about last year's submissions still need last year's IDs."""
+    path = _tmp_settings()
+    students.save_students([{"name": "Sam", "student_id": "1111111"}], path, year=Y26)
+    view = students.save_students([{"name": "Sam", "student_id": "2222222"}], path, year=Y27)
+    assert view == [{"name": "Sam", "student_id": "2222222"}]
+    assert students.load_students(path) == [{"name": "Sam", "ids": {Y26: "1111111", Y27: "2222222"}}]
+
+
+def test_clearing_an_id_clears_only_that_year():
+    path = _tmp_settings()
+    students.save_students([{"name": "Sam", "student_id": "1111111"}], path, year=Y26)
+    students.save_students([{"name": "Sam", "student_id": "2222222"}], path, year=Y27)
+    students.save_students([{"name": "Sam", "student_id": ""}], path, year=Y27)
+    assert students.load_students(path) == [{"name": "Sam", "ids": {Y26: "1111111"}}]
+
+
+def test_a_settings_file_from_before_per_year_ids_loads_as_2026_2027():
+    """The one-ID-per-child format was only ever written during 2026-27."""
+    path = _tmp_settings()
+    path.write_text('{"students": [{"name": "Sam", "student_id": "1234567"}]}')
+    assert students.load_students(path) == [{"name": "Sam", "ids": {Y26: "1234567"}}]
+
+
+def test_children_missing_this_years_id_are_flagged_after_the_rollover():
+    path = _tmp_settings()
+    students.save_students([{"name": "Sam", "student_id": "1111111"},
+                            {"name": "Alex", "student_id": "3333333"}], path, year=Y26)
+    students.save_students([{"name": "Sam", "student_id": "1111111"},
+                            {"name": "Alex", "student_id": "4444444"}], path, year=Y27)
+    assert students.needing_new_ids(students.load_students(path), Y27) == []
+    students.save_students([{"name": "Sam", "student_id": ""},
+                            {"name": "Alex", "student_id": "4444444"}], path, year=Y27)
+    assert students.needing_new_ids(students.load_students(path), Y27) == ["Sam"]
 
 
 def test_the_settings_file_is_kept_out_of_git():
@@ -106,6 +147,7 @@ def test_earlier_submissions_are_grouped_by_reimbursement_across_years():
            current=[_line("Alex", "Notebook", "IMG_1698.pdf", "$2.10", "10000002-1", "09/02/2026")])
     subs = receipt_note.prior_submissions("IMG_1698")
     assert [(s["student"], s["reimbursement_id"]) for s in subs] == [("Sam", "10000001"), ("Alex", "10000002")]
+    assert [s["year"] for s in subs] == [PRIOR_TAB.split(" ")[0], CURRENT_TAB.split(" ")[0]]
     assert [i["description"] for i in subs[0]["items"]] == ["Crayons", "Rulers"]
     assert subs[0]["total"] == 1.53
     assert subs[1]["date_submitted"] == "09/02/2026" and subs[1]["total"] == 2.10
@@ -132,6 +174,7 @@ def _pdf_text(data: bytes) -> str:
 
 
 SAM_SUBMISSION = {"student": "Sam", "reimbursement_id": "10000001", "date_submitted": "08/20/2026",
+                  "year": Y26,
                   "items": [{"description": "Crayons", "price": 0.53},
                             {"description": "Rulers", "price": 1.00}],
                   "total": 1.53}
@@ -140,7 +183,7 @@ RECEIPT = {"store": "Walmart", "date": "07/23/2026", "total": 87.36}
 
 def test_the_note_names_the_child_student_id_reimbursement_and_items():
     text = _pdf_text(receipt_note.build_note_pdf(
-        "IMG_1698", [SAM_SUBMISSION], RECEIPT, [{"name": "Sam", "student_id": "1234567"}]))
+        "IMG_1698", [SAM_SUBMISSION], RECEIPT, [{"name": "Sam", "ids": {Y26: "1234567"}}]))
     for expected in ("Walmart", "07/23/2026", "$87.36", "IMG_1698",
                      "Sam", "SUFS student ID 1234567", "Reimbursement 10000001",
                      "submitted 08/20/2026", "Crayons", "$0.53", "Rulers", "$1.00", "$1.53",
@@ -151,6 +194,13 @@ def test_the_note_names_the_child_student_id_reimbursement_and_items():
 def test_a_child_without_a_saved_student_id_is_marked_not_on_file():
     text = _pdf_text(receipt_note.build_note_pdf("IMG_1698", [SAM_SUBMISSION], RECEIPT, []))
     assert "SUFS student ID not on file" in text
+
+
+def test_the_note_uses_the_student_id_from_the_year_of_each_submission():
+    """A submission from last scholarship year needs last year's ID, not this year's."""
+    saved = [{"name": "Sam", "ids": {Y26: "1111111", Y27: "2222222"}}]
+    text = _pdf_text(receipt_note.build_note_pdf("IMG_1698", [SAM_SUBMISSION], RECEIPT, saved))
+    assert "SUFS student ID 1111111" in text and "2222222" not in text
 
 
 def test_the_note_lists_every_earlier_submission():
@@ -202,7 +252,9 @@ def test_the_confirm_page_lookup_lists_earlier_submissions_and_missing_ids():
     _sheet(prior=[_line("Sam", "Crayons", "IMG_1698.pdf", "0.53", "10000001-1"),
                   _line("Alex", "Rulers", "IMG_1698.pdf", "1.00", "10000002-1")])
     settings = _tmp_settings()
-    students.save_students([{"name": "Sam", "student_id": "1234567"}], settings)
+    # Both submissions sit in the prior year's tab, so that year's IDs are the ones that count.
+    students.save_students([{"name": "Sam", "student_id": "1234567"}], settings,
+                           year=PRIOR_TAB.split(" ")[0])
     data = _client(settings, UPLOADED_IMG_1698).get("/note/prior").get_json()
     assert data["reference"] == "IMG_1698"
     assert [(s["student"], s["reimbursement_id"], s["item_count"], s["total"])
@@ -255,6 +307,61 @@ def test_the_students_page_refuses_a_duplicate_child():
     assert r.status_code == 400 and "twice" in r.get_json()["error"]
 
 
+def test_after_the_rollover_the_students_page_asks_for_the_new_years_ids():
+    from src import note_routes
+    settings = _tmp_settings()
+    students.save_students([{"name": "Sam", "student_id": "1111111"}], settings, year=Y26)
+    client = _client(settings)
+    real, note_routes.current_year = note_routes.current_year, lambda: Y27
+    try:
+        page = client.get("/students").data.decode()
+    finally:
+        note_routes.current_year = real
+    assert "2027–2028" in page and "New scholarship year" in page
+    assert 'value="Sam"' in page and 'value="1111111"' not in page
+
+
+def test_the_students_page_saves_ids_for_the_current_year():
+    from src import note_routes
+    settings = _tmp_settings()
+    students.save_students([{"name": "Sam", "student_id": "1111111"}], settings, year=Y26)
+    client = _client(settings)
+    real, note_routes.current_year = note_routes.current_year, lambda: Y27
+    try:
+        client.post("/students", json={"students": [{"name": "Sam", "student_id": "2222222"}]})
+    finally:
+        note_routes.current_year = real
+    assert students.load_students(settings) == [{"name": "Sam", "ids": {Y26: "1111111", Y27: "2222222"}}]
+
+
+# ---------------------------------------------------------------------------
+# Picking the student when logging
+# ---------------------------------------------------------------------------
+
+def test_a_saved_childs_name_is_logged_with_the_saved_spelling():
+    saved = [{"name": "Sam", "ids": {}}, {"name": "Alex", "ids": {}}]
+    assert students.canonical_name("sAm", saved) == "Sam"
+    assert students.canonical_name("  alex ", saved) == "Alex"
+
+
+def test_a_name_that_isnt_saved_is_kept_as_typed():
+    assert students.canonical_name("Casey", [{"name": "Sam", "ids": {}}]) == "Casey"
+    assert students.canonical_name("  Casey ", []) == "Casey"
+
+
+def test_the_page_gets_childrens_names_but_never_their_ids():
+    settings = _tmp_settings()
+    students.save_students([{"name": "Sam", "student_id": "1234567"},
+                            {"name": "Alex", "student_id": "7654321"}], settings, year=Y26)
+    r = _client(settings).get("/students/names")
+    assert r.get_json() == {"names": ["Sam", "Alex"]}
+    assert b"1234567" not in r.data and b"7654321" not in r.data
+
+
+def test_no_saved_children_means_no_names():
+    assert _client(_tmp_settings()).get("/students/names").get_json() == {"names": []}
+
+
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
@@ -268,6 +375,15 @@ def test_the_confirm_page_checks_for_earlier_submissions_and_offers_the_note():
 
 def test_the_home_page_links_to_the_students_page():
     assert 'href="/students"' in (ROOT / "templates" / "index.html").read_text()
+
+
+def test_the_confirm_page_offers_a_button_per_child_with_a_typed_fallback():
+    page = (ROOT / "templates" / "confirm.html").read_text()
+    assert "fetch('/students/names')" in page
+    assert 'id="student-buttons"' in page
+    assert 'id="student-name"' in page          # Other… and the no-children fallback
+    assert 'href="/students"' in page
+    assert page.count("selectedStudent()") >= 2  # logging and the Keep stamp
 
 
 if __name__ == "__main__":

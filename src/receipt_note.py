@@ -14,7 +14,7 @@ from datetime import date
 from fpdf import FPDF
 
 from src.sheets_logger import normalize_reference, read_testing_rows, reference_from_invoice
-from src.students import student_id_for
+from src.students import current_year, student_id_for
 
 
 def _money(value) -> float:
@@ -30,7 +30,8 @@ def prior_submissions(reference: str, rows: list[dict] | None = None) -> list[di
     A row belongs to the receipt when its Invoice column (the file name the
     upload page stored) matches `reference` under the app's usual
     normalisation. Returned oldest tab first, each as
-    {student, reimbursement_id, date_submitted, items: [{description, price}], total}.
+    {student, reimbursement_id, date_submitted, year, items: [{description, price}], total},
+    where `year` is the scholarship year of the Line Items tab it was logged in.
     """
     wanted = normalize_reference(reference)
     if not wanted:
@@ -46,6 +47,7 @@ def prior_submissions(reference: str, rows: list[dict] | None = None) -> list[di
             "student": (row.get("student") or "").strip(),
             "reimbursement_id": reimbursement_id,
             "date_submitted": (row.get("date_submitted") or "").strip(),
+            "year": (row.get("tab") or "").split(" ")[0],   # "2026-2027 Line Items" -> "2026-2027"
             "items": [],
             "total": 0.0,
         })
@@ -85,7 +87,8 @@ def build_note_pdf(reference: str, submissions: list[dict], receipt: dict,
     """The note as PDF bytes.
 
     `receipt` may carry store, date and total for the header; `students` is the
-    saved Students list, used to look up each child's SUFS student ID.
+    saved Students list. Each child's SUFS student ID is the one for the year the
+    earlier submission was made, since SUFS issues new IDs every year.
     """
     pdf = FPDF(format="Letter")
     pdf.set_margins(22, 22)
@@ -117,7 +120,8 @@ def build_note_pdf(reference: str, submissions: list[dict], receipt: dict,
 
     for sub in submissions:
         pdf.ln(3)
-        student_id = student_id_for(sub["student"], students) or "not on file"
+        year = sub.get("year") or current_year()
+        student_id = student_id_for(sub["student"], students, year) or "not on file"
         line(f"{sub['student']} - SUFS student ID {student_id}", style="B")
         line(f"Reimbursement {sub['reimbursement_id'] or '(ID not recorded)'}, "
              f"submitted {sub['date_submitted'] or '(date not recorded)'}")

@@ -26,12 +26,18 @@
     <a class="back" href="/">← Back to intake</a>
     <p class="eyebrow" style="margin-top:18px">Step Up for Students · Settings</p>
     <h1 class="title">Students</h1>
-    <p class="sub">Each child's SUFS student ID. It goes in the note you attach when one receipt is submitted for more than one child.</p>
-    <p class="private-note">Saved on this computer only, in <code>students.json</code>, which is never committed to git.</p>
+    <p class="sub">Each child's SUFS student ID for the {{ year }} scholarship year. SUFS issues new IDs every year; they go in the note you attach when one receipt is submitted for more than one child.</p>
+    <p class="private-note">Saved on this computer only, in <code>students.json</code>, which is never committed to git. Earlier years' IDs are kept for notes about earlier submissions.</p>
+
+    {% if needing %}
+    <div class="warning-banner" style="margin-top:20px">
+      New scholarship year: enter the {{ year }} student ID for {{ needing | join(', ') }}.
+    </div>
+    {% endif %}
 
     <div class="card" style="margin-top:24px">
       <div id="status-bar" class="status-bar"></div>
-      <div class="col-head"><span>Name</span><span>SUFS student ID</span><span></span></div>
+      <div class="col-head"><span>Name</span><span>SUFS student ID ({{ year }})</span><span></span></div>
       <div class="student-rows" id="rows">
         {% for s in students %}
         <div class="student-row">

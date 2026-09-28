@@ -18,8 +18,7 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, request, session
 
-from src import receipt_folder, scholarship_year
-
+from src import receipt_folder, scholarship_year, students
 from src.sheets_logger import (
     AlreadyLoggedError,
     delete_unsubmitted_row,
@@ -35,6 +34,17 @@ bp = Blueprint("submission", __name__)
 def receipts_folder() -> Path:
     """The year folder receipts are filed from (replaced in tests)."""
     return scholarship_year.receipts_folder()
+
+
+def students_file() -> Path:
+    """The saved Students list (replaced in tests)."""
+    return students.STUDENTS_FILE
+
+
+def _student_name(typed: str) -> str:
+    """A saved child's name in its saved spelling, so "zion" and "ZIon" log as
+    one child; a name that isn't saved is kept as typed."""
+    return students.canonical_name(typed, students.load_students(students_file()))
 
 
 def _file_receipt(reference: str) -> dict:
@@ -62,6 +72,7 @@ def log_submission():
         return jsonify({"error": "Student name and SUFS ID are required."}), 400
     if not items:
         return jsonify({"error": "No selected items to log."}), 400
+    student = _student_name(student)
 
     invoice_filename = session.get("invoice_filename", "")
     try:
@@ -121,7 +132,7 @@ def unsubmitted_mark():
     try:
         status = mark_unsubmitted_partial(
             reference,
-            (data.get("student") or "").strip(),
+            _student_name(data.get("student") or ""),
             (data.get("sufs_id") or "").strip(),
         )
     except Exception as e:

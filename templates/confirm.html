@@ -59,6 +59,10 @@
     #log-status.error { background: var(--danger-bg); color: var(--danger); }
     #filed-note { margin-top: 10px; font-size: .86rem; color: var(--ink-2); display: none; }
     #filed-note.warn { color: var(--pend); }
+    .student-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+    .student-buttons:empty { display: none; }
+    .student-buttons .btn[aria-pressed="true"] { background: var(--pine); border-color: var(--pine); color: #fff; }
+    .student-hint { font-size: .8rem; color: var(--ink-3); margin-top: 6px; display: none; }
 
     #unsubmitted-panel {
       display: none; margin-top: 18px; padding: 18px 20px;
@@ -195,8 +199,12 @@
     <p class="sub">After SUFS shows the confirmation page, paste the student name and reimbursement ID below, then log it.</p>
     <div class="log-fields">
       <div>
-        <label for="student-name">Student Name</label>
+        <label for="student-name">Student</label>
+        <div id="student-buttons" class="student-buttons" role="group" aria-label="Student"></div>
         <input type="text" id="student-name" placeholder="Child's full name" />
+        <p class="student-hint" id="student-hint">
+          <a href="/students">Add your children on the Students page</a> to pick them here.
+        </p>
       </div>
       <div>
         <label for="sufs-id">SUFS Reimbursement ID</label>
@@ -419,12 +427,12 @@ async function submitItems() {
 
 async function logToSheet() {
   const logStatus = document.getElementById('log-status');
-  const student = document.getElementById('student-name').value.trim();
+  const student = selectedStudent();
   const sufsId  = document.getElementById('sufs-id').value.trim();
 
   if (!student || !sufsId) {
     logStatus.className = 'error'; logStatus.style.display = 'block';
-    logStatus.textContent = 'Please enter both the student name and SUFS reimbursement ID.';
+    logStatus.textContent = 'Please choose the student and enter the SUFS reimbursement ID.';
     return;
   }
 
@@ -470,6 +478,58 @@ async function logToSheet() {
 // A staged order is only removed when the user says so: the same Amazon order
 // is often reimbursed once per child, so "logged" doesn't mean "finished".
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Student picker
+//
+// One button per child saved on the Students page, plus "Other…" for a typed
+// name. With no children saved, the text box shows on its own with a link to
+// the Students page. The server logs a saved child's name in its saved
+// spelling either way.
+// ---------------------------------------------------------------------------
+let pickedStudent = '';
+
+function selectedStudent() {
+  const box = document.getElementById('student-name');
+  return box.style.display === 'none' ? pickedStudent : box.value.trim();
+}
+
+function pickStudent(btn, name) {
+  document.querySelectorAll('#student-buttons .btn').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  btn.setAttribute('aria-pressed', 'true');
+  const box = document.getElementById('student-name');
+  if (name === null) {             // Other…
+    pickedStudent = '';
+    box.style.display = '';
+    box.focus();
+  } else {
+    pickedStudent = name;
+    box.style.display = 'none';
+  }
+}
+
+(async function loadStudentButtons() {
+  let names = [];
+  try {
+    const res = await fetch('/students/names');
+    if (res.ok) names = (await res.json()).names || [];
+  } catch (e) { /* fall back to the text box */ }
+  if (!names.length) {
+    document.getElementById('student-hint').style.display = 'block';
+    return;
+  }
+  document.getElementById('student-name').style.display = 'none';
+  const wrap = document.getElementById('student-buttons');
+  for (const name of [...names, null]) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-sm btn-outline';
+    btn.textContent = name === null ? 'Other…' : name;   // textContent: names never become markup
+    btn.setAttribute('aria-pressed', 'false');
+    btn.onclick = () => pickStudent(btn, name);
+    wrap.appendChild(btn);
+  }
+})();
+
 let stagedOrder = null;
 
 // Where the receipt's file went after logging: Submitted/, left in the year
@@ -548,7 +608,7 @@ async function keepUnsubmitted() {
   try {
     const { ok, data } = await postUnsubmitted('/unsubmitted/mark', {
       order_number: stagedOrder.order_number,
-      student: document.getElementById('student-name').value.trim(),
+      student: selectedStudent(),
       sufs_id: document.getElementById('sufs-id').value.trim()
     });
     if (!ok) { unsubmittedStatus('error', 'Error: ' + (data.error || 'Unknown error')); return; }

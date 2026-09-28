@@ -22,6 +22,11 @@ def settings_path() -> Path:
     return students.STUDENTS_FILE
 
 
+def current_year() -> str:
+    """The scholarship year the Students page edits (replaced in tests)."""
+    return students.current_year()
+
+
 def _uploaded_reference() -> str:
     """The receipt on the confirm page, as a reference; "" if nothing is uploaded."""
     return reference_from_invoice(session.get("invoice_filename", ""))
@@ -40,17 +45,33 @@ def _receipt_summary() -> dict:
 
 @bp.route("/students")
 def students_page():
-    return render_template("students.html", students=students.load_students(settings_path()))
+    """The current scholarship year's IDs. SUFS issues new ones every year, so
+    after the July rollover the page asks for any that aren't entered yet."""
+    year = current_year()
+    saved = students.load_students(settings_path())
+    return render_template(
+        "students.html",
+        students=students.year_view(saved, year),
+        year=year.replace("-", "–"),
+        needing=students.needing_new_ids(saved, year),
+    )
 
 
 @bp.route("/students", methods=["POST"])
 def students_save():
     rows = (request.get_json(silent=True) or {}).get("students") or []
     try:
-        saved = students.save_students(rows, settings_path())
+        saved = students.save_students(rows, settings_path(), year=current_year())
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"students": saved})
+
+
+@bp.route("/students/names")
+def students_names():
+    """The saved children's names for the confirm page's buttons. Names only:
+    student IDs stay off the page and appear only in the downloaded note."""
+    return jsonify({"names": students.names(students.load_students(settings_path()))})
 
 
 @bp.route("/note/prior")
@@ -63,7 +84,8 @@ def note_prior():
     except Exception as e:
         return jsonify({"error": f"Couldn't check the tracking sheet for earlier submissions: {e}"}), 502
     saved = students.load_students(settings_path())
-    missing = [s["student"] for s in submissions if not students.student_id_for(s["student"], saved)]
+    missing = [s["student"] for s in submissions
+               if not students.student_id_for(s["student"], saved, s["year"] or current_year())]
     return jsonify({
         "reference": reference,
         "submissions": [{
