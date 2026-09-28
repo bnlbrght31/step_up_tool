@@ -55,6 +55,7 @@ const GROUPS = [
 const KIND = { 'pdf': 'PDF', 'photo': 'photo', 'photo+pdf': 'photo + PDF', 'unsupported': '—' };
 
 let receipts = [];
+let finished = [];      // submitted receipts no longer in Unsubmitted
 let running = false;
 let pendingSkips = 0;   // Not submitting requests still in flight
 
@@ -120,8 +121,11 @@ function render() {
     const untracked = status === 'untracked';
     const toggleBtn = untracked ? ''
       : `<button class="btn btn-sm btn-outline" onclick="toggle('${status}', this)">${open ? 'Hide' : 'Show'}</button>`;
+    const fileBtn = status === 'submitted' && finished.length
+      ? `<button class="btn btn-sm btn-primary" id="file-btn" onclick="fileSubmitted()">Move ${finished.length} to Submitted/</button>`
+      : '';
     return `<section class="group">
-      <div class="group-head"><p class="section-label">${esc(heading)} (${rows.length})</p>${toggleBtn}</div>
+      <div class="group-head"><p class="section-label">${esc(heading)} (${rows.length})</p>${fileBtn}${toggleBtn}</div>
       <div class="table-wrap ${open ? '' : 'collapsed'}" id="group-${status}">
         <table><tbody>${rows.map(r => rowHtml(r, untracked)).join('')}</tbody></table>
       </div>
@@ -150,6 +154,7 @@ async function loadReview() {
     const data = await res.json();
     if (!res.ok) { setStatus('err', data.error || 'The review failed.'); return; }
     receipts = data.receipts;
+    finished = data.finished || [];
     render();
     const n = receipts.filter(r => r.status === 'untracked').length;
     setStatus(n ? 'info' : 'ok',
@@ -178,6 +183,25 @@ async function skip(i) {
   } finally {
     pendingSkips--;
     updateAddButton();
+  }
+}
+
+// Submitted receipts that are no longer in Unsubmitted are finished: move them
+// into Submitted/. Ones still in Unsubmitted have more children to go and stay.
+async function fileSubmitted() {
+  if (running || pendingSkips) return;
+  const btn = document.getElementById('file-btn');
+  btn.disabled = true;
+  try {
+    const { ok, data } = await post('/receipts/file-submitted', {});
+    if (!ok) { setStatus('err', data.error || "Couldn't move them."); btn.disabled = false; return; }
+    await loadReview();
+    const kept = data.kept.length
+      ? ` ${data.kept.length} still in Unsubmitted stayed in the folder (more kids to submit).` : '';
+    setStatus('ok', `Moved ${data.moved.length} file${data.moved.length === 1 ? '' : 's'} to Submitted/.${kept}`);
+  } catch (e) {
+    setStatus('err', 'Network error: ' + e.message);
+    btn.disabled = false;
   }
 }
 

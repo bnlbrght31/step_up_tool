@@ -263,6 +263,12 @@ For untracked receipts:
 - **Not submitting** moves the receipt's files to `Not submitting/`, so it
   isn't offered again. Drag it back out to undo.
 
+If any receipts in the **Submitted** group are finished, meaning they're in a
+Line Items tab and no longer in Unsubmitted, a **Move N to Submitted/** button
+files them. It catches receipts logged before automatic filing existed, or
+uploaded from somewhere other than the year folder. Receipts still in
+Unsubmitted have more kids to submit and stay put.
+
 Nothing is ever deleted. Later, when you upload one of these receipts on the
 intake page and log it, the Remove/Keep prompt finds its Unsubmitted row by
 file name, and the finished receipt is filed in `Submitted/`. The review

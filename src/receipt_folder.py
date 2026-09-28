@@ -222,3 +222,21 @@ def file_as_submitted(folder: Path, reference: str) -> list[Path]:
         return []
     receipt = find_receipt(folder, reference)
     return move_into(folder, SUBMITTED, receipt.files) if receipt else []
+
+
+def split_submitted(folder: Path, submitted_refs: set[str],
+                    staged_refs: set[str]) -> tuple[list[Receipt], list[Receipt]]:
+    """(finished, waiting) among the submitted receipts in `folder`.
+
+    Finished receipts are no longer in Unsubmitted and belong in Submitted/.
+    Waiting ones are still in Unsubmitted: submitted once per child, with more
+    children to go, however many Line Items rows they already have.
+    """
+    submitted = [r for r in review(folder, submitted_refs, set()) if r.status == "submitted"]
+    waiting = [r for r in submitted if normalize_reference(r.reference) in staged_refs]
+    return [r for r in submitted if r not in waiting], waiting
+
+
+def finished_receipts(folder: Path, submitted_refs: set[str], staged_refs: set[str]) -> list[Receipt]:
+    """Submitted receipts no longer in Unsubmitted: ready to file in Submitted/."""
+    return split_submitted(folder, submitted_refs, staged_refs)[0]

@@ -74,7 +74,9 @@ def receipts_review():
     except Exception as e:
         return _sheet_error(e)
     receipts = rf.review(folder, submitted, staged)
-    return jsonify({"folder": str(folder), "receipts": [r.to_dict() for r in receipts]})
+    finished = rf.finished_receipts(folder, submitted, staged)
+    return jsonify({"folder": str(folder), "receipts": [r.to_dict() for r in receipts],
+                    "finished": [r.reference for r in finished]})
 
 
 @bp.route("/receipts/skip", methods=["POST"])
@@ -92,6 +94,26 @@ def receipts_skip():
         return jsonify({"error": f"{receipt.reference} is {status}; only untracked receipts can be skipped."}), 409
     moved = rf.move_into(folder, rf.NOT_SUBMITTING, receipt.files)
     return jsonify({"moved": [p.name for p in moved]})
+
+
+@bp.route("/receipts/file-submitted", methods=["POST"])
+@_one_at_a_time
+def receipts_file_submitted():
+    """Move every finished submitted receipt into Submitted/.
+
+    Receipts still in Unsubmitted stay: more children are still to be submitted.
+    """
+    folder = receipts_folder()
+    if not folder.is_dir():
+        return jsonify({"error": f"Folder not found: {folder}"}), 404
+    try:
+        submitted, staged = read_tracked_references()
+    except Exception as e:
+        return _sheet_error(e)
+    finished, waiting = rf.split_submitted(folder, submitted, staged)
+    moved = [p.name for receipt in finished
+             for p in rf.move_into(folder, rf.SUBMITTED, receipt.files)]
+    return jsonify({"moved": moved, "kept": [r.reference for r in waiting]})
 
 
 @bp.route("/receipts/add", methods=["POST"])

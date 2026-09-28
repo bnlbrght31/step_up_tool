@@ -543,6 +543,56 @@ def test_the_page_locks_a_row_before_its_skip_request_returns():
     assert "if (running || pendingSkips) return;" in page
 
 
+# ---------------------------------------------------------------------------
+# Filing receipts that are already submitted
+# ---------------------------------------------------------------------------
+
+def test_finished_receipts_are_submitted_and_no_longer_in_unsubmitted():
+    with _folder({"a.pdf": PDF, "b.pdf": PDF, "c.pdf": PDF}) as root:
+        refs = [r.reference for r in rf.finished_receipts(root, {"a", "b"}, {"b"})]
+    assert refs == ["a"]          # b still has kids to submit; c was never submitted
+
+
+def test_file_submitted_moves_only_finished_receipts():
+    _sheet(staged=["b"], submitted=["a.pdf", "b.pdf"])
+    with _folder({"a.pdf": PDF, "a.jpeg": b"jpeg", "b.pdf": PDF, "c.pdf": PDF,
+                  "Originals/a.HEIC": b"heic"}) as root:
+        data = _client(root).post("/receipts/file-submitted").get_json()
+        assert sorted(data["moved"]) == ["a.jpeg", "a.pdf"]
+        assert data["kept"] == ["b"]
+        assert sorted(p.name for p in (root / "Submitted").iterdir()) == ["a.jpeg", "a.pdf"]
+        assert (root / "b.pdf").exists() and (root / "c.pdf").exists()
+        assert (root / "Originals" / "a.HEIC").exists()
+
+
+def test_file_submitted_with_nothing_finished_moves_nothing():
+    _sheet(submitted=[])
+    with _folder({"a.pdf": PDF}) as root:
+        data = _client(root).post("/receipts/file-submitted").get_json()
+        assert data["moved"] == [] and not (root / "Submitted").exists()
+
+
+def test_file_submitted_reports_a_sheet_error_and_moves_nothing():
+    sheets_logger._get_service = lambda: _FailingSheets(
+        {"Unsubmitted": [sheets_logger.UNSUBMITTED_HEADER]})
+    with _folder({"a.pdf": PDF}) as root:
+        r = _client(root).post("/receipts/file-submitted")
+        assert r.status_code == 502 and (root / "a.pdf").exists()
+
+
+def test_the_review_says_which_submitted_receipts_are_finished():
+    _sheet(staged=["b"], submitted=["a.pdf", "b.pdf"])
+    with _folder({"a.pdf": PDF, "b.pdf": PDF}) as root:
+        data = _client(root).get("/receipts/review").get_json()
+    assert data["finished"] == ["a"]
+
+
+def test_the_page_offers_to_file_finished_receipts():
+    page = (TEMPLATES / "receipts.html").read_text()
+    assert "post('/receipts/file-submitted'" in page
+    assert "data.finished" in page
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
