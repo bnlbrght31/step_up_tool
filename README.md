@@ -215,6 +215,15 @@ after logging:
 Nothing is ever removed automatically — the same purchase is often reimbursed
 once per child, so only you know when the last one is done.
 
+**Filing the receipt.** Once a receipt is finished, its file moves from this
+year's folder (`~/Desktop/SUFS/<year>/`) into a `Submitted/` subfolder, so the
+folder only holds receipts still to do. That happens right after logging when
+the receipt isn't in Unsubmitted, or when you choose **Remove from
+Unsubmitted**. **Keep it — more kids to submit** leaves the file where it is
+for the next child's upload. If the file isn't in the year folder (say you
+uploaded it from Downloads), nothing moves, and a failed move never undoes the
+log.
+
 **Matching.** A staged row is found by its **Order/Receipt #** column. Amazon
 rows get that filled in by the scanner. For any other vendor, paste your own
 reference into that column when you add the row by hand, then name the receipt
@@ -256,7 +265,28 @@ For untracked receipts:
 
 Nothing is ever deleted. Later, when you upload one of these receipts on the
 intake page and log it, the Remove/Keep prompt finds its Unsubmitted row by
-file name.
+file name, and the finished receipt is filed in `Submitted/`. The review
+ignores all three subfolders (`Originals/`, `Not submitting/`, `Submitted/`).
+
+---
+
+## Receipts split across children
+
+When one receipt is reimbursed separately for each child, SUFS reviewers need to
+see what was already claimed from it. After the first child's submission is
+logged, uploading the same receipt again for the next child shows an
+**Already submitted for another child** panel on the review page, listing each
+earlier submission. **Download note (PDF)** saves a one-page note naming each
+earlier submission's child, SUFS student ID, reimbursement ID and items. Attach
+it to the new submission alongside the receipt.
+
+Enter each child's SUFS student ID once on the **Students** page (home page →
+Students). The IDs are saved on this computer only, in `students.json`, which is
+git-ignored. A child with no saved ID shows as "not on file" in the note until
+you add it.
+
+The earlier submission is found by the receipt's file name, so upload the same
+file each time.
 
 ---
 

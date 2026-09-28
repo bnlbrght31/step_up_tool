@@ -4,12 +4,21 @@ Routes for logging a submission and tidying the Unsubmitted staging tab.
 Kept out of main.py so they can be exercised without importing the browser
 agent or the receipt parser, neither of which this flow touches.
 
-The cleanup is always user-driven: logging a submission never removes anything
-by itself, because one Amazon order is often reimbursed separately for each
-child and only the user knows when the last one is done.
+The cleanup is always user-driven: logging a submission never removes an
+Unsubmitted row by itself, because one order is often reimbursed separately
+for each child and only the user knows when the last one is done.
+
+A finished receipt's file is moved from the year folder into Submitted/:
+right after logging when the receipt isn't staged (nothing says more children
+are coming), or when "Remove from Unsubmitted" is chosen. "Keep" leaves it in
+place for the next child's upload.
 """
 
+from pathlib import Path
+
 from flask import Blueprint, jsonify, request, session
+
+from src import receipt_folder, scholarship_year
 
 from src.sheets_logger import (
     AlreadyLoggedError,
@@ -21,6 +30,25 @@ from src.sheets_logger import (
 )
 
 bp = Blueprint("submission", __name__)
+
+
+def receipts_folder() -> Path:
+    """The year folder receipts are filed from (replaced in tests)."""
+    return scholarship_year.receipts_folder()
+
+
+def _file_receipt(reference: str) -> dict:
+    """Move a finished receipt into Submitted/.
+
+    Never raises: it runs after the sheet write has succeeded, and a failed
+    move must not turn that success into an error.
+    """
+    try:
+        moved = receipt_folder.file_as_submitted(receipts_folder(), reference)
+    except Exception as e:
+        print(f"[submitted] couldn't file {reference}: {e}")
+        return {"moved": [], "error": f"Couldn't move the receipt to Submitted: {e}"}
+    return {"moved": [p.name for p in moved]}
 
 
 @bp.route("/log-submission", methods=["POST"])
@@ -46,13 +74,22 @@ def log_submission():
     # The rows are safely logged at this point. Looking up the staged order is a
     # convenience for the next prompt, so a failure here must not report the
     # submission as failed.
-    staged = None
+    reference = reference_from_invoice(invoice_filename)
+    staged, lookup_failed = None, False
     try:
-        staged = find_unsubmitted_row(reference_from_invoice(invoice_filename))
+        staged = find_unsubmitted_row(reference)
     except Exception as e:
+        lookup_failed = True
         print(f"[unsubmitted] lookup failed for {invoice_filename}: {e}")
 
-    return jsonify({"success": True, "logged": len(items), "unsubmitted": staged})
+    # A staged receipt waits for the Remove/Keep choice. So does one whose
+    # staging couldn't be checked: more children may still be coming.
+    if staged or lookup_failed:
+        filed = {"moved": [], "deferred": True}
+    else:
+        filed = _file_receipt(reference)
+
+    return jsonify({"success": True, "logged": len(items), "unsubmitted": staged, "filed": filed})
 
 
 def _reference():
@@ -72,7 +109,8 @@ def unsubmitted_remove():
         return jsonify({"error": str(e)}), 409
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    return jsonify({"removed": removed})
+    # Remove means the receipt is finished, whether or not the row was still there.
+    return jsonify({"removed": removed, "filed": _file_receipt(reference)})
 
 
 @bp.route("/unsubmitted/mark", methods=["POST"])

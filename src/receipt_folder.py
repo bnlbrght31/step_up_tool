@@ -29,6 +29,7 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif"}
 # anything moved into these is never offered again.
 ORIGINALS = "Originals"
 NOT_SUBMITTING = "Not submitting"
+SUBMITTED = "Submitted"
 
 
 def _supported(path: Path) -> bool:
@@ -205,3 +206,19 @@ def row_from_parse(reference: str, items: list, reconciliation: dict | None) -> 
     price = f"{float(total):.2f}" if total is not None else ""
     return ["", item, (first.vendor or "").strip(), reference, price,
             (first.purchase_date or "").strip(), ""]
+
+
+# ---------------------------------------------------------------------------
+# Filing a finished receipt
+# ---------------------------------------------------------------------------
+
+def file_as_submitted(folder: Path, reference: str) -> list[Path]:
+    """Move a finished receipt's top-level files into Submitted/.
+
+    Returns the new paths; [] when the folder or the receipt isn't there (e.g.
+    it was uploaded from Downloads). Photos already in Originals/ stay put.
+    """
+    if not folder.is_dir():
+        return []
+    receipt = find_receipt(folder, reference)
+    return move_into(folder, SUBMITTED, receipt.files) if receipt else []

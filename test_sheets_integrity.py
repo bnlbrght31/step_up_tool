@@ -85,9 +85,13 @@ def test_an_id_that_merely_starts_with_the_same_digits_is_not_a_duplicate():
 
 
 def test_the_route_reports_a_duplicate_log_as_a_conflict():
+    import tempfile
     from flask import Flask
+    from src import submission_routes
     from src.submission_routes import bp
 
+    temp_folder = Path(tempfile.mkdtemp())       # never the real receipts folder
+    submission_routes.receipts_folder = lambda: temp_folder
     svc = _fake(current_rows=[_logged_row("10000001-1")])
     app = Flask(__name__)
     app.secret_key = "test"

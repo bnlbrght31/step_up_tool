@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Students — SUFS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ledger.css') }}">
+  <style>
+    .private-note { font-size: .82rem; color: var(--ink-3); margin-top: 8px; }
+    .col-head, .student-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: center; }
+    .col-head {
+      font-family: var(--mono); font-size: .64rem; font-weight: 500; color: var(--ink-3);
+      text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px;
+    }
+    .student-rows { display: grid; gap: 10px; }
+    .student-row input { width: 100%; }
+    .action-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
+    @media (max-width: 480px) { .col-head { display: none; } .student-row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="shell" style="max-width:720px">
+    <a class="back" href="/">← Back to intake</a>
+    <p class="eyebrow" style="margin-top:18px">Step Up for Students · Settings</p>
+    <h1 class="title">Students</h1>
+    <p class="sub">Each child's SUFS student ID. It goes in the note you attach when one receipt is submitted for more than one child.</p>
+    <p class="private-note">Saved on this computer only, in <code>students.json</code>, which is never committed to git.</p>
+
+    <div class="card" style="margin-top:24px">
+      <div id="status-bar" class="status-bar"></div>
+      <div class="col-head"><span>Name</span><span>SUFS student ID</span><span></span></div>
+      <div class="student-rows" id="rows">
+        {% for s in students %}
+        <div class="student-row">
+          <input type="text" class="name" value="{{ s.name }}" aria-label="Name" />
+          <input type="text" class="sid" value="{{ s.student_id }}" aria-label="SUFS student ID" />
+          <button class="btn btn-sm btn-outline" onclick="removeRow(this)">Remove</button>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="action-row">
+        <button class="btn btn-outline" onclick="addRow()">+ Add child</button>
+        <button class="btn btn-primary" id="save-btn" onclick="save()">Save</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+function setStatus(type, msg) {
+  const bar = document.getElementById('status-bar');
+  bar.className = 'status-bar ' + type;
+  bar.textContent = msg;
+}
+
+function addRow() {
+  const row = document.createElement('div');
+  row.className = 'student-row';
+  for (const [cls, label] of [['name', 'Name'], ['sid', 'SUFS student ID']]) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = cls;
+    input.setAttribute('aria-label', label);
+    row.appendChild(input);
+  }
+  const remove = document.createElement('button');
+  remove.className = 'btn btn-sm btn-outline';
+  remove.textContent = 'Remove';
+  remove.onclick = () => removeRow(remove);
+  row.appendChild(remove);
+  document.getElementById('rows').appendChild(row);
+  row.querySelector('.name').focus();
+}
+
+function removeRow(btn) {
+  btn.closest('.student-row').remove();
+}
+
+async function save() {
+  const btn = document.getElementById('save-btn');
+  const students = [...document.querySelectorAll('.student-row')].map(row => ({
+    name: row.querySelector('.name').value,
+    student_id: row.querySelector('.sid').value,
+  }));
+  btn.disabled = true;
+  try {
+    const res = await fetch('/students', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ students }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setStatus('err', data.error || "Couldn't save."); return; }
+    setStatus('ok', `Saved ${data.students.length} student${data.students.length === 1 ? '' : 's'}.`);
+  } catch (e) {
+    setStatus('err', 'Network error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+if (!document.querySelector('.student-row')) addRow();
+</script>
+</body>
+</html>

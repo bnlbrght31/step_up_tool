@@ -223,9 +223,15 @@ def _client():
     Deliberately does NOT import main, which pulls in Playwright and an Anthropic
     client at module load -- neither has anything to do with these routes.
     """
+    import tempfile
     from flask import Flask
+    from src import submission_routes
     from src.submission_routes import bp
 
+    # Logging and Remove file finished receipts in the year folder: point them
+    # at an empty temporary one so no test can reach the real receipts.
+    temp_folder = Path(tempfile.mkdtemp())
+    submission_routes.receipts_folder = lambda: temp_folder
     app = Flask(__name__, template_folder="../templates")
     app.secret_key = "test"
     app.config["TESTING"] = True
@@ -331,6 +337,13 @@ def test_keep_route_stamps_the_status_and_keeps_the_row():
     assert "Alex 10000001" in r.get_json()["status"]
     assert TARGET in [row[3] for row in svc.tabs["Unsubmitted"][1:]]
     assert svc.deletions() == []
+
+
+def test_route_tests_never_point_at_the_real_receipts_folder():
+    """Logging and Remove file receipts in the year folder; tests must use a temp one."""
+    from src import scholarship_year, submission_routes
+    _client()
+    assert submission_routes.receipts_folder() != scholarship_year.receipts_folder()
 
 
 if __name__ == "__main__":

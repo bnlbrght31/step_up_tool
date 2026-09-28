@@ -57,6 +57,8 @@
     #log-status { margin-top: 14px; padding: 10px 14px; border-radius: 8px; font-size: .88rem; display: none; }
     #log-status.success { background: var(--ok-bg); color: var(--ok); }
     #log-status.error { background: var(--danger-bg); color: var(--danger); }
+    #filed-note { margin-top: 10px; font-size: .86rem; color: var(--ink-2); display: none; }
+    #filed-note.warn { color: var(--pend); }
 
     #unsubmitted-panel {
       display: none; margin-top: 18px; padding: 18px 20px;
@@ -72,6 +74,12 @@
     #unsubmitted-status { margin-top: 14px; padding: 10px 14px; border-radius: 8px; font-size: .88rem; display: none; }
     #unsubmitted-status.success { background: var(--ok-bg); color: var(--ok); }
     #unsubmitted-status.error { background: var(--danger-bg); color: var(--danger); }
+
+    #shared-panel { display: none; margin-top: 16px; padding: 18px 22px; }
+    #shared-panel .section-label { margin-bottom: 10px; }
+    #shared-panel .shared-line { font-size: .9rem; color: var(--ink-2); margin: 4px 0; }
+    #shared-panel .shared-warn { font-size: .84rem; color: var(--pend); margin: 10px 0 0; display: none; }
+    #shared-panel .btn { margin-top: 14px; }
 
     @media (max-width: 480px) { .log-fields { grid-template-columns: 1fr; } }
   </style>
@@ -99,6 +107,13 @@
   {% if reconciliation and reconciliation.has_totals %}
   <div class="recon-banner {{ 'ok' if reconciliation.total_ok else 'warn' }}" id="recon-banner" style="margin-top:16px">Checking totals…</div>
   {% endif %}
+
+  <div id="shared-panel" class="card">
+    <p class="section-label">Already submitted for another child</p>
+    <div id="shared-list"></div>
+    <p class="shared-warn" id="shared-warn"></p>
+    <a class="btn btn-outline" id="shared-download" href="/note.pdf">Download note (PDF)</a>
+  </div>
 
   <div class="url-row">
     <label for="form-url">Form URL (optional — used if no SUFS tab is open):</label>
@@ -190,6 +205,7 @@
     </div>
     <button class="btn btn-green" id="log-btn" onclick="logToSheet()">Log to sheet</button>
     <div id="log-status"></div>
+    <p id="filed-note"></p>
 
     <div id="unsubmitted-panel">
       <strong>Still in Unsubmitted</strong>
@@ -433,6 +449,7 @@ async function logToSheet() {
       logStatus.className = 'success'; logStatus.style.display = 'block';
       logStatus.textContent = `✓ ${data.logged} row(s) logged to sheet with IDs ${sufsId}-1 through ${sufsId}-${data.logged}.`;
       showUnsubmittedPrompt(data.unsubmitted);
+      showFiled(data.filed, data.unsubmitted);
       logged = true;
     } else {
       logStatus.className = 'error'; logStatus.style.display = 'block';
@@ -454,6 +471,27 @@ async function logToSheet() {
 // is often reimbursed once per child, so "logged" doesn't mean "finished".
 // ---------------------------------------------------------------------------
 let stagedOrder = null;
+
+// Where the receipt's file went after logging: Submitted/, left in the year
+// folder for the Remove/Keep choice, or not found there.
+function setFiledNote(text, warn) {
+  const el = document.getElementById('filed-note');
+  el.textContent = text;
+  el.className = warn ? 'warn' : '';
+  el.style.display = text ? 'block' : 'none';
+}
+
+function showFiled(filed, staged) {
+  if (!filed) return setFiledNote('', false);
+  if (filed.error) return setFiledNote(filed.error, true);
+  if (filed.moved && filed.moved.length)
+    return setFiledNote(`✓ Moved ${filed.moved.join(', ')} to Submitted/.`, false);
+  if (filed.deferred)
+    return setFiledNote(staged
+      ? 'The receipt file stays in the folder until you choose below.'
+      : "Couldn't check the Unsubmitted tab, so the receipt file was left in the folder.", !staged);
+  setFiledNote("This receipt's file isn't in this year's folder, so nothing was moved.", false);
+}
 
 function showUnsubmittedPrompt(row) {
   stagedOrder = row;
@@ -498,6 +536,7 @@ async function removeUnsubmitted() {
     unsubmittedStatus('success', data.removed
       ? '✓ Removed from Unsubmitted.'
       : 'Already gone from Unsubmitted — nothing to remove.');
+    showFiled(data.filed, null);
     document.querySelectorAll('#unsubmitted-panel .btn').forEach(b => b.disabled = true);
   } catch (e) {
     unsubmittedStatus('error', 'Network error: ' + e.message);
@@ -514,11 +553,47 @@ async function keepUnsubmitted() {
     });
     if (!ok) { unsubmittedStatus('error', 'Error: ' + (data.error || 'Unknown error')); return; }
     unsubmittedStatus('success', `✓ Kept. Status now reads: ${data.status}`);
+    setFiledNote("The receipt file stays in the folder for the next child's upload.", false);
     document.querySelectorAll('#unsubmitted-panel .btn').forEach(b => b.disabled = true);
   } catch (e) {
     unsubmittedStatus('error', 'Network error: ' + e.message);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Shared receipts
+//
+// If this receipt was already logged for another child, offer the note to
+// attach to this submission, naming the earlier ones.
+// ---------------------------------------------------------------------------
+(async function loadSharedReceipt() {
+  const panel = document.getElementById('shared-panel');
+  const warn = document.getElementById('shared-warn');
+  try {
+    const res = await fetch('/note/prior');
+    const data = await res.json();
+    if (!res.ok) {
+      document.getElementById('shared-download').style.display = 'none';
+      warn.textContent = data.error || "Couldn't check for earlier submissions of this receipt.";
+      warn.style.display = 'block';
+      panel.style.display = 'block';
+      return;
+    }
+    if (!data.submissions.length) return;
+    document.getElementById('shared-list').innerHTML = data.submissions.map(s =>
+      `<p class="shared-line">${esc(s.student)} · reimbursement ${esc(s.reimbursement_id)} · ` +
+      `submitted ${esc(s.date_submitted)} · ${s.item_count} item${s.item_count === 1 ? '' : 's'}, ` +
+      `$${Number(s.total).toFixed(2)}</p>`).join('');
+    if (data.missing_ids.length) {
+      warn.innerHTML = `No SUFS student ID saved for ${esc(data.missing_ids.join(', '))}; ` +
+        `the note will say "not on file" until you <a href="/students">add it on the Students page</a>.`;
+      warn.style.display = 'block';
+    }
+    panel.style.display = 'block';
+  } catch (e) {
+    // Optional panel: the rest of the page works without it.
+  }
+})();
 </script>
 </body>
 </html>
