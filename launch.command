@@ -5,7 +5,8 @@
 #   3) Opens the app UI as a tab in that same Chrome window
 # The HTTP port comes from the shared registry (shared/ports.py); $PORT overrides.
 
-PROJECT="/Users/balbright/Desktop/claude/step_up_tool"
+# This script lives in the project folder, so it finds the project wherever it is.
+PROJECT="$(cd "$(dirname "$0")" && pwd)"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 SUFS_PROFILE="$HOME/.sufs-agent-chrome"
 DEBUG_PORT=9222
