@@ -63,6 +63,10 @@
     .student-buttons:empty { display: none; }
     .student-buttons .btn[aria-pressed="true"] { background: var(--pine); border-color: var(--pine); color: #fff; }
     .student-hint { font-size: .8rem; color: var(--ink-3); margin-top: 6px; display: none; }
+    .submitted-tag {
+      display: none; margin-left: auto; padding: 2px 9px; border-radius: 6px;
+      font-family: var(--mono); font-size: .7rem; color: var(--pend); background: var(--pend-bg);
+    }
 
     #unsubmitted-panel {
       display: none; margin-top: 18px; padding: 18px 20px;
@@ -112,6 +116,10 @@
   <div class="recon-banner {{ 'ok' if reconciliation.total_ok else 'warn' }}" id="recon-banner" style="margin-top:16px">Checking totals…</div>
   {% endif %}
 
+  <div id="reused-banner" class="recon-banner ok" style="display:none; margin-top:16px">
+    Using your saved reading of this receipt (no new Claude read). Items already submitted for a child start unchecked.
+  </div>
+
   <div id="shared-panel" class="card">
     <p class="section-label">Already submitted for another child</p>
     <div id="shared-list"></div>
@@ -131,6 +139,7 @@
       <div class="item-header">
         <input type="checkbox" id="include-{{ loop.index0 }}" checked onchange="toggleCard({{ loop.index0 }})" />
         <span class="item-number">Item {{ '%02d' % loop.index }}</span>
+        <span class="submitted-tag" id="submitted-{{ loop.index0 }}"></span>
       </div>
       <div class="grid">
 
@@ -652,6 +661,34 @@ async function keepUnsubmitted() {
     panel.style.display = 'block';
   } catch (e) {
     // Optional panel: the rest of the page works without it.
+  }
+})();
+
+// ---------------------------------------------------------------------------
+// Receipt history
+//
+// Items of this receipt already submitted for a child start unchecked, with a
+// label saying for whom, so the next child's submission doesn't repeat them.
+// Re-checking one is still allowed.
+// ---------------------------------------------------------------------------
+(async function applyReceiptHistory() {
+  try {
+    const res = await fetch('/receipt-history/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.reused) document.getElementById('reused-banner').style.display = 'block';
+    for (const [key, label] of Object.entries(data.labels)) {
+      const i = Number(key);
+      const box = document.getElementById('include-' + i);
+      if (!box) continue;
+      box.checked = false;
+      toggleCard(i);
+      const tag = document.getElementById('submitted-' + i);
+      tag.textContent = label;
+      tag.style.display = 'inline-block';
+    }
+  } catch (e) {
+    // Optional: the page works without it.
   }
 })();
 </script>

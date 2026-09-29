@@ -18,7 +18,7 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, request, session
 
-from src import receipt_folder, scholarship_year, students
+from src import receipt_folder, receipt_history, scholarship_year, students
 from src.sheets_logger import (
     AlreadyLoggedError,
     delete_unsubmitted_row,
@@ -39,6 +39,27 @@ def receipts_folder() -> Path:
 def students_file() -> Path:
     """The saved Students list (replaced in tests)."""
     return students.STUDENTS_FILE
+
+
+def history_file() -> Path:
+    """Where receipt history is kept (replaced in tests)."""
+    return receipt_history.HISTORY_FILE
+
+
+def _record_history(all_items: list[dict], student: str, sufs_id: str, reference: str) -> None:
+    """Remember which of this receipt's items went to this child.
+
+    Never raises: it runs after the sheet write has succeeded. Skipped when the
+    page has no uploaded file to identify the receipt by.
+    """
+    sha = session.get("invoice_sha256")
+    if not sha:
+        return
+    try:
+        receipt_history.record_submission(sha, reference, all_items, session.get("reconciliation"),
+                                          student, sufs_id, history_file())
+    except Exception as e:
+        print(f"[history] couldn't record {reference}: {e}")
 
 
 def _student_name(typed: str) -> str:
@@ -82,10 +103,12 @@ def log_submission():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    # The rows are safely logged at this point. Looking up the staged order is a
-    # convenience for the next prompt, so a failure here must not report the
+    # The rows are safely logged at this point. Everything below is a convenience
+    # (history, the staged-order prompt, filing), so none of it may report the
     # submission as failed.
     reference = reference_from_invoice(invoice_filename)
+    _record_history(data.get("items", []), student, sufs_id, reference)
+
     staged, lookup_failed = None, False
     try:
         staged = find_unsubmitted_row(reference)

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, render_template, request, send_file, session
 
-from src import receipt_note, students
+from src import receipt_history, receipt_note, students
 from src.sheets_logger import reference_from_invoice
 
 bp = Blueprint("notes", __name__)
@@ -25,6 +25,21 @@ def settings_path() -> Path:
 def current_year() -> str:
     """The scholarship year the Students page edits (replaced in tests)."""
     return students.current_year()
+
+
+def history_file() -> Path:
+    """Where receipt history is kept (replaced in tests)."""
+    return receipt_history.HISTORY_FILE
+
+
+@bp.route("/receipt-history/status")
+def receipt_history_status():
+    """For the confirm page: whether this receipt's saved reading was reused, and
+    a label for each item already submitted for a child (keyed by item position)."""
+    entry = receipt_history.saved_reading(session.get("invoice_sha256", ""), history_file())
+    labels = receipt_history.item_labels(entry)
+    return jsonify({"reused": bool(session.get("reused_reading")),
+                    "labels": {str(i): label for i, label in labels.items()}})
 
 
 def _uploaded_reference() -> str:

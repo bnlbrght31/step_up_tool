@@ -18,7 +18,7 @@ from src.option_match import build_matches
 from src.pdf_downloader import download_invoices
 from src.receipt_parser import parse_receipt
 from src.sheets_logger import append_orders, get_existing_order_numbers
-from src import scholarship_year
+from src import receipt_history, scholarship_year
 from src.submission_routes import bp as submission_bp
 from src.receipt_routes import bp as receipts_bp
 from src.note_routes import bp as notes_bp
@@ -58,22 +58,35 @@ def upload():
     if not file or file.filename == "" or not allowed_file(file.filename):
         return redirect(url_for("index"))
 
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    filepath = UPLOAD_DIR / secure_filename(file.filename)
-    file.save(filepath)
+    data = file.read()
+    sha = receipt_history.fingerprint(data)
+    saved = receipt_history.saved_reading(sha)
+    if saved:
+        # The same file was logged before, for another child. Reuse the items as
+        # confirmed then -- same order, no second Claude read -- so the confirm
+        # page can start the already-submitted ones unchecked.
+        session["items"] = saved["items"]
+        session["parse_cost"] = 0.0
+        session["reconciliation"] = saved["reconciliation"]
+        session["reused_reading"] = True
+    else:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        filepath = UPLOAD_DIR / secure_filename(file.filename)
+        filepath.write_bytes(data)
+        try:
+            items, parse_cost, reconciliation = parse_receipt(str(filepath))
+        except Exception as e:
+            return render_template("index.html", error=f"Failed to parse receipt: {e}", options_discovered=load_form_options() is not None)
+        finally:
+            # Receipts hold personal purchase data — don't leave them on disk.
+            filepath.unlink(missing_ok=True)
+        session["items"] = [item.to_dict() for item in items]
+        session["parse_cost"] = parse_cost
+        session["reconciliation"] = reconciliation
+        session["reused_reading"] = False
 
-    try:
-        items, parse_cost, reconciliation = parse_receipt(str(filepath))
-    except Exception as e:
-        return render_template("index.html", error=f"Failed to parse receipt: {e}", options_discovered=load_form_options() is not None)
-    finally:
-        # Receipts hold personal purchase data — don't leave them on disk.
-        filepath.unlink(missing_ok=True)
-
-    session["items"] = [item.to_dict() for item in items]
-    session["parse_cost"] = parse_cost
-    session["reconciliation"] = reconciliation
     session["invoice_filename"] = secure_filename(file.filename)
+    session["invoice_sha256"] = sha
     return redirect(url_for("confirm"))
 
 

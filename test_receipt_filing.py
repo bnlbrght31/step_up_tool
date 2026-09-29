@@ -54,6 +54,7 @@ def _client(folder, invoice):
     submission_routes.receipts_folder = lambda: folder
     no_students = Path(tempfile.mkdtemp()) / "students.json"
     submission_routes.students_file = lambda: no_students
+    submission_routes.history_file = lambda: no_students.with_name("receipt_history.json")
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(submission_routes.bp)

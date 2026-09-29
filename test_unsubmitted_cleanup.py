@@ -234,6 +234,7 @@ def _client():
     submission_routes.receipts_folder = lambda: temp_folder
     no_students = temp_folder / "students.json"      # never the real student list
     submission_routes.students_file = lambda: no_students
+    submission_routes.history_file = lambda: temp_folder / "receipt_history.json"
     app = Flask(__name__, template_folder="../templates")
     app.secret_key = "test"
     app.config["TESTING"] = True

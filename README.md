@@ -303,6 +303,17 @@ the rollover.
 The earlier submission is found by the receipt's file name, so upload the same
 file each time.
 
+**Items already submitted start unchecked.** When you log a receipt, the app
+remembers its items as you confirmed them and which ones went to which child,
+in `receipt_history.json` on this computer only (git-ignored, since it holds
+purchase details). Uploading the same file again reuses that saved reading —
+same items in the same order, with no second Claude read — and every item
+already submitted starts unchecked, labeled "Submitted for Sam · 12345678".
+Re-check an item if you really mean to include it again. Receipts are matched by
+the file's contents, so a renamed copy still matches, but an edited or
+re-exported file is read fresh. Receipts logged before this existed aren't
+remembered until their next log.
+
 ---
 
 ## SUFS Status Scanner
