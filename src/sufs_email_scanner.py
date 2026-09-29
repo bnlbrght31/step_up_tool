@@ -9,10 +9,13 @@ Email formats:
              body: "Payment message: Invoices 33010312-1,33010312-2"
 """
 
+import hashlib
 import os
 import re
 from datetime import datetime
+from pathlib import Path
 
+from src import email_cache, gmail
 from src.gmail import list_message_stubs
 
 # SUFS sends from two address variants — approvals/on-hold use the hyphenated
@@ -80,6 +83,49 @@ def _email_date(msg) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Reading each email once
+# ---------------------------------------------------------------------------
+# Every scanner below turns each matching email into exactly one result. What
+# an email says never changes, so results are cached by Gmail message ID and a
+# scan downloads only the emails it hasn't read before (see src/email_cache.py).
+
+# Fingerprint of this file: when the email-reading code changes, results cached
+# by the old code are discarded and every email is read again.
+READER_VERSION = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16]
+
+
+def cache_file() -> Path:
+    """Where scan results are cached (replaced in tests)."""
+    return email_cache.CACHE_FILE
+
+
+def _scan(kind: str, query: str, read_one) -> list[dict]:
+    """Every email matching `query`, as results from read_one(svc, message_id).
+
+    Emails read before come from the cache; new ones are downloaded, read and
+    added. The cache is saved even if a read fails, so a rerun resumes where
+    this one stopped; the failed email isn't cached and is read again.
+    """
+    svc = _get_gmail_service()
+    cache = email_cache.ScanCache(cache_file(), READER_VERSION)
+    results = []
+    try:
+        for stub in list_message_stubs(svc, query):
+            result = cache.get(kind, stub["id"])
+            if result is None:
+                result = read_one(svc, stub["id"])
+                cache.put(kind, stub["id"], result)
+            results.append(result)
+    finally:
+        cache.save()
+    return results
+
+
+def _fetch(svc, message_id: str) -> dict:
+    return gmail.execute(svc.users().messages().get(userId="me", id=message_id, format="full"))
+
+
+# ---------------------------------------------------------------------------
 # Approved email scanner
 # ---------------------------------------------------------------------------
 
@@ -89,33 +135,29 @@ def scan_approved_emails(after_date: str = None) -> list[dict]:
     after_date: optional YYYY/MM/DD string to limit search.
     Returns list of dicts: {reimbursement_id, student, amount, category, date, email_id}
     """
-    svc = _get_gmail_service()
     query = f'from:{SUFS_SENDER} subject:"Reimbursement request approved"'
     if after_date:
         query += f" after:{after_date}"
+    return _scan("approved", query, _read_approved)
 
-    results = []
-    for stub in list_message_stubs(svc, query):
-        msg = svc.users().messages().get(
-            userId="me", id=stub["id"], format="full"
-        ).execute()
-        body = _decode_body(msg)
 
-        reimb   = re.search(r"Reimbursement ID:\s*(\d+)", body)
-        student = re.search(r"Student['’]s Name:\s*(.+)", body)
-        amount  = re.search(r"in the amount of \$([\d,]+(?:\.\d+)?)", body)
-        cat     = re.search(r"reimbursement request for (.+?) in the amount", body)
+def _read_approved(svc, message_id: str) -> dict:
+    msg = _fetch(svc, message_id)
+    body = _decode_body(msg)
 
-        results.append({
-            "reimbursement_id": reimb.group(1).strip()   if reimb   else None,
-            "student":          student.group(1).strip() if student else None,
-            "amount":           amount.group(1)           if amount  else None,
-            "category":         cat.group(1).strip()     if cat     else None,
-            "date":             _email_date(msg),
-            "email_id":         stub["id"],
-        })
+    reimb   = re.search(r"Reimbursement ID:\s*(\d+)", body)
+    student = re.search(r"Student['’]s Name:\s*(.+)", body)
+    amount  = re.search(r"in the amount of \$([\d,]+(?:\.\d+)?)", body)
+    cat     = re.search(r"reimbursement request for (.+?) in the amount", body)
 
-    return results
+    return {
+        "reimbursement_id": reimb.group(1).strip()   if reimb   else None,
+        "student":          student.group(1).strip() if student else None,
+        "amount":           amount.group(1)           if amount  else None,
+        "category":         cat.group(1).strip()     if cat     else None,
+        "date":             _email_date(msg),
+        "email_id":         message_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -132,43 +174,39 @@ def scan_paid_emails(after_date: str = None) -> list[dict]:
       {top_level_ids, line_items, partial, date, email_id}
       partial=True if not all line items for a reimbursement were paid
     """
-    svc = _get_gmail_service()
     # Broad subject match catches all program variants (FTCPEP, FES, UA, etc.)
     query = f'from:{SUFS_SENDER} subject:"submitted a payment to you"'
     if after_date:
         query += f" after:{after_date}"
+    return _scan("paid", query, _read_paid)
 
-    results = []
-    for stub in list_message_stubs(svc, query):
-        msg = svc.users().messages().get(
-            userId="me", id=stub["id"], format="full"
-        ).execute()
-        body = _decode_body(msg)
 
-        # "Payment message: Invoices 33010312-1,33010312-2"
-        inv_match = re.search(r"[Ii]nvoices?\s+([\d,\-\s]+)", body)
-        line_items: list[str] = []
-        top_ids: list[str] = []
+def _read_paid(svc, message_id: str) -> dict:
+    msg = _fetch(svc, message_id)
+    body = _decode_body(msg)
 
-        if inv_match:
-            raw = inv_match.group(1).strip()
-            line_items = [i.strip() for i in re.split(r"[,\s]+", raw) if re.match(r"\d+", i.strip())]
-            # Preserve insertion order while deduplicating
-            seen: set[str] = set()
-            for item in line_items:
-                tid = item.split("-")[0]
-                if tid not in seen:
-                    top_ids.append(tid)
-                    seen.add(tid)
+    # "Payment message: Invoices 33010312-1,33010312-2"
+    inv_match = re.search(r"[Ii]nvoices?\s+([\d,\-\s]+)", body)
+    line_items: list[str] = []
+    top_ids: list[str] = []
 
-        results.append({
-            "top_level_ids": top_ids,
-            "line_items":    line_items,
-            "date":          _email_date(msg),
-            "email_id":      stub["id"],
-        })
+    if inv_match:
+        raw = inv_match.group(1).strip()
+        line_items = [i.strip() for i in re.split(r"[,\s]+", raw) if re.match(r"\d+", i.strip())]
+        # Preserve insertion order while deduplicating
+        seen: set[str] = set()
+        for item in line_items:
+            tid = item.split("-")[0]
+            if tid not in seen:
+                top_ids.append(tid)
+                seen.add(tid)
 
-    return results
+    return {
+        "top_level_ids": top_ids,
+        "line_items":    line_items,
+        "date":          _email_date(msg),
+        "email_id":      message_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -183,31 +221,27 @@ def scan_on_hold_emails(after_date: str = None) -> list[dict]:
 
     Returns list of dicts: {reimbursement_id, amount, student, date, email_id}
     """
-    svc = _get_gmail_service()
     query = f'from:{SUFS_SENDER} subject:"reimbursement request is on hold"'
     if after_date:
         query += f" after:{after_date}"
+    return _scan("on_hold", query, _read_on_hold)
 
-    results = []
-    for stub in list_message_stubs(svc, query):
-        msg = svc.users().messages().get(
-            userId="me", id=stub["id"], format="full"
-        ).execute()
-        body = _decode_body(msg)
 
-        reimb   = re.search(r"Reimbursement ID:\s*(\d+)", body)
-        student = re.search(r"Student['']s Name:\s*(.+)", body)
-        amount  = re.search(r"in the amount of \$([\d,]+(?:\.\d+)?)", body)
+def _read_on_hold(svc, message_id: str) -> dict:
+    msg = _fetch(svc, message_id)
+    body = _decode_body(msg)
 
-        results.append({
-            "reimbursement_id": reimb.group(1).strip()   if reimb   else None,
-            "student":          student.group(1).strip() if student else None,
-            "amount":           amount.group(1)           if amount  else None,
-            "date":             _email_date(msg),
-            "email_id":         stub["id"],
-        })
+    reimb   = re.search(r"Reimbursement ID:\s*(\d+)", body)
+    student = re.search(r"Student['']s Name:\s*(.+)", body)
+    amount  = re.search(r"in the amount of \$([\d,]+(?:\.\d+)?)", body)
 
-    return results
+    return {
+        "reimbursement_id": reimb.group(1).strip()   if reimb   else None,
+        "student":          student.group(1).strip() if student else None,
+        "amount":           amount.group(1)           if amount  else None,
+        "date":             _email_date(msg),
+        "email_id":         message_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -221,83 +255,77 @@ def scan_remittance_emails(after_date: str = None) -> list[dict]:
 
     Returns list of dicts: {top_level_ids, line_items, amount, date, email_id}
     """
-    import base64
-    import tempfile
-    import os
-    import pdfplumber
-
-    svc = _get_gmail_service()
     query = 'from:APReports@sufs.org subject:"Remittance Advice"'
     if after_date:
         query += f" after:{after_date}"
+    return _scan("remittance", query, _read_remittance)
 
-    results = []
-    for stub in list_message_stubs(svc, query):
-        msg = svc.users().messages().get(
-            userId="me", id=stub["id"], format="full"
-        ).execute()
 
-        date = _email_date(msg)
+def _read_remittance(svc, message_id: str) -> dict:
+    import base64
+    import tempfile
+    import pdfplumber
 
-        # Total amount from email body (sanity check only)
-        body = _decode_body(msg)
-        amt_match = re.search(r"\$([\d,.]+)", body)
-        total_amount = amt_match.group(1) if amt_match else ""
+    msg = _fetch(svc, message_id)
+    date = _email_date(msg)
 
-        # Find PDF attachment
-        line_items: list[str] = []
-        top_ids: list[str] = []
+    # Total amount from email body (sanity check only)
+    body = _decode_body(msg)
+    amt_match = re.search(r"\$([\d,.]+)", body)
+    total_amount = amt_match.group(1) if amt_match else ""
 
-        for att in msg.get("payload", {}).get("parts", []):
-            filename = att.get("filename", "")
-            if not filename.lower().endswith(".pdf"):
-                continue
+    # Find PDF attachment
+    line_items: list[str] = []
+    top_ids: list[str] = []
 
-            att_id = att.get("body", {}).get("attachmentId")
-            if not att_id:
-                continue
+    for att in msg.get("payload", {}).get("parts", []):
+        filename = att.get("filename", "")
+        if not filename.lower().endswith(".pdf"):
+            continue
 
-            # Download
-            att_data = svc.users().messages().attachments().get(
-                userId="me", messageId=stub["id"], id=att_id
-            ).execute()
-            pdf_bytes = base64.urlsafe_b64decode(att_data["data"] + "==")
+        att_id = att.get("body", {}).get("attachmentId")
+        if not att_id:
+            continue
 
-            # Write to temp file, parse, delete
-            tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-            try:
-                tmp.write(pdf_bytes)
-                tmp.close()
-                with pdfplumber.open(tmp.name) as pdf:
-                    text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-                print(f"  [remittance] {date} ${total_amount} — PDF text preview:\n{text[:600]}\n")
+        # Download
+        att_data = gmail.execute(svc.users().messages().attachments().get(
+            userId="me", messageId=message_id, id=att_id
+        ))
+        pdf_bytes = base64.urlsafe_b64decode(att_data["data"] + "==")
 
-                # Invoice IDs look like: 35307411-1  or  35307411
-                found = re.findall(r"\b(\d{7,9}-\d+)\b", text)
-                if not found:
-                    # Fall back to bare IDs if no suffixed ones
-                    found = re.findall(r"\b(\d{7,9})\b", text)
-                line_items = list(dict.fromkeys(found))  # deduplicate, preserve order
-                seen: set[str] = set()
-                for item in line_items:
-                    tid = item.split("-")[0]
-                    if tid not in seen:
-                        top_ids.append(tid)
-                        seen.add(tid)
-            finally:
-                os.unlink(tmp.name)
+        # Write to temp file, parse, delete
+        tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+        try:
+            tmp.write(pdf_bytes)
+            tmp.close()
+            with pdfplumber.open(tmp.name) as pdf:
+                text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+            print(f"  [remittance] {date} ${total_amount} — PDF text preview:\n{text[:600]}\n")
 
-            break  # only one PDF per email
+            # Invoice IDs look like: 35307411-1  or  35307411
+            found = re.findall(r"\b(\d{7,9}-\d+)\b", text)
+            if not found:
+                # Fall back to bare IDs if no suffixed ones
+                found = re.findall(r"\b(\d{7,9})\b", text)
+            line_items = list(dict.fromkeys(found))  # deduplicate, preserve order
+            seen: set[str] = set()
+            for item in line_items:
+                tid = item.split("-")[0]
+                if tid not in seen:
+                    top_ids.append(tid)
+                    seen.add(tid)
+        finally:
+            os.unlink(tmp.name)
 
-        results.append({
-            "top_level_ids": top_ids,
-            "line_items":    line_items,
-            "total_amount":  total_amount,
-            "date":          date,
-            "email_id":      stub["id"],
-        })
+        break  # only one PDF per email
 
-    return results
+    return {
+        "top_level_ids": top_ids,
+        "line_items":    line_items,
+        "total_amount":  total_amount,
+        "date":          date,
+        "email_id":      message_id,
+    }
 
 
 # ---------------------------------------------------------------------------

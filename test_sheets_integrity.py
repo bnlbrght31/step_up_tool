@@ -155,7 +155,7 @@ class _Result:
     def __init__(self, value):
         self.value = value
 
-    def execute(self):
+    def execute(self, num_retries=0):       # same signature as the real client's
         return self.value
 
 

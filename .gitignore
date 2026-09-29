@@ -18,3 +18,5 @@ reimbursements_raw.json
 assets/icon.iconset/
 students.json
 receipt_history.json
+email_scan_cache.json
+.email_scan_cache.*

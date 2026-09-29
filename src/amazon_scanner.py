@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src import scholarship_year
+from src import gmail
 from src.gmail import list_message_stubs
 
 SCAN_STATE_FILE = Path("scan_state.json")
@@ -249,9 +250,9 @@ def scan_return_emails(after_date: str) -> dict:
     for query in queries:
         for ref in list_message_stubs(service, query):
             try:
-                msg = service.users().messages().get(
+                msg = gmail.execute(service.users().messages().get(
                     userId="me", id=ref["id"], format="full"
-                ).execute()
+                ))
                 subject = _get_header(msg, "Subject")
                 body = _decode_body(msg)
                 order_numbers = ORDER_RE.findall(f"{subject}\n{body}")
@@ -440,9 +441,9 @@ def scan_amazon_orders(existing_order_numbers: set, from_date: str | None = None
 
     for msg_ref in messages:
         try:
-            msg = service.users().messages().get(
+            msg = gmail.execute(service.users().messages().get(
                 userId="me", id=msg_ref["id"], format="full"
-            ).execute()
+            ))
             parsed = _parse_order_email(msg)
             if not parsed:
                 continue
