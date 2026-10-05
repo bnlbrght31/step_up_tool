@@ -8,6 +8,7 @@ own. Values are read once when a module loads, so a running app picks up a
 rollover on its next restart.
 """
 
+import os
 from datetime import date
 from pathlib import Path
 
@@ -39,10 +40,13 @@ def gmail_date(year: int) -> str:
 def receipts_folder(today: date | None = None) -> Path:
     """Where the year's receipts live: ~/Desktop/SUFS/<year label>/.
 
-    The Amazon invoice downloader saves here and the receipts folder review
-    reads it, so both move to the new year's folder each July.
+    SUFS_RECEIPTS_DIR in .env replaces ~/Desktop/SUFS; the year subfolder is
+    still added. The Amazon invoice downloader saves here and the receipts
+    folder review reads it, so both move to the new year's folder each July.
     """
-    return Path.home() / "Desktop" / "SUFS" / label(start_year(today))
+    base = os.environ.get("SUFS_RECEIPTS_DIR", "").strip()
+    root = Path(base).expanduser() if base else Path.home() / "Desktop" / "SUFS"
+    return root / label(start_year(today))
 
 
 def current_line_items_tab(today: date | None = None) -> str:

@@ -70,8 +70,46 @@ def test_app_modules_take_their_year_values_from_the_shared_setting():
 
 
 def test_receipts_folder_is_the_years_folder_under_desktop_sufs():
-    assert sy.receipts_folder(date(2026, 9, 26)) == Path.home() / "Desktop" / "SUFS" / "2026-2027"
-    assert sy.receipts_folder(date(2027, 7, 1)) == Path.home() / "Desktop" / "SUFS" / "2027-2028"
+    with _receipts_dir_env(None):
+        assert sy.receipts_folder(date(2026, 9, 26)) == Path.home() / "Desktop" / "SUFS" / "2026-2027"
+        assert sy.receipts_folder(date(2027, 7, 1)) == Path.home() / "Desktop" / "SUFS" / "2027-2028"
+
+
+def test_receipts_dir_setting_moves_the_folder_but_keeps_year_subfolders():
+    with _receipts_dir_env("/data/Receipts"):
+        assert sy.receipts_folder(date(2026, 9, 26)) == Path("/data/Receipts/2026-2027")
+        assert sy.receipts_folder(date(2027, 7, 1)) == Path("/data/Receipts/2027-2028")
+
+
+def test_receipts_dir_setting_expands_home_and_ignores_blank():
+    with _receipts_dir_env("~/Documents/SUFS"):
+        assert sy.receipts_folder(date(2026, 9, 26)) == Path.home() / "Documents" / "SUFS" / "2026-2027"
+    with _receipts_dir_env("   "):
+        assert sy.receipts_folder(date(2026, 9, 26)) == Path.home() / "Desktop" / "SUFS" / "2026-2027"
+
+
+def test_env_example_documents_the_receipts_dir_setting():
+    example = (Path(__file__).parent / ".env.example").read_text()
+    assert "SUFS_RECEIPTS_DIR" in example
+
+
+class _receipts_dir_env:
+    """Set (or with None, unset) SUFS_RECEIPTS_DIR for the block, then restore it."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def __enter__(self):
+        import os
+        self.saved = os.environ.pop("SUFS_RECEIPTS_DIR", None)
+        if self.value is not None:
+            os.environ["SUFS_RECEIPTS_DIR"] = self.value
+
+    def __exit__(self, *exc):
+        import os
+        os.environ.pop("SUFS_RECEIPTS_DIR", None)
+        if self.saved is not None:
+            os.environ["SUFS_RECEIPTS_DIR"] = self.saved
 
 
 def test_invoice_downloader_saves_into_the_receipts_folder():
