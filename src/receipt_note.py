@@ -130,6 +130,9 @@ def build_note_pdf(reference: str, submissions: list[dict], receipt: dict,
         amount_row("Total", sub["total"], bold=True)
 
     pdf.ln(4)
-    line("This request covers the remaining items on the receipt.")
+    # Not "the remaining items": a receipt may be split three or more ways, so
+    # this request isn't necessarily the last one.
+    line("The items in this request are different ones from the same receipt, "
+         "not the items listed above.")
     line(f"Prepared {date.today():%m/%d/%Y}", size=9)
     return bytes(pdf.output())

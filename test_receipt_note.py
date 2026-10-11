@@ -187,8 +187,15 @@ def test_the_note_names_the_child_student_id_reimbursement_and_items():
     for expected in ("Walmart", "07/23/2026", "$87.36", "IMG_1698",
                      "Sam", "SUFS student ID 1234567", "Reimbursement 10000001",
                      "submitted 08/20/2026", "Crayons", "$0.53", "Rulers", "$1.00", "$1.53",
-                     "remaining items"):
+                     "different ones from the same receipt"):
         assert expected in text, f"{expected!r} missing from:\n{text}"
+
+
+def test_the_note_never_claims_this_request_is_the_last_split():
+    """A receipt may be split three or more ways, so the second child's request
+    isn't necessarily 'the rest' of the receipt."""
+    text = _pdf_text(receipt_note.build_note_pdf("IMG_1698", [SAM_SUBMISSION], RECEIPT, []))
+    assert "remaining" not in text.lower() and "the rest" not in text.lower()
 
 
 def test_a_child_without_a_saved_student_id_is_marked_not_on_file():
