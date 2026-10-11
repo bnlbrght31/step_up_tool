@@ -593,6 +593,119 @@ def test_the_page_offers_to_file_finished_receipts():
     assert "data.finished" in page
 
 
+# ---------------------------------------------------------------------------
+# Photos saved with a .pdf name
+# ---------------------------------------------------------------------------
+# A photo renamed to .pdf isn't a PDF: Claude's API rejects it ("The PDF
+# specified was not valid") and SUFS needs a real PDF too. Files are judged by
+# their contents, and renamed photos are converted like any other photo.
+
+def _jpeg_bytes(w: int = 400, h: int = 300) -> bytes:
+    buf = io.BytesIO()
+    _photo(w, h).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def _real_pdf_bytes() -> bytes:
+    buf = io.BytesIO()
+    _photo().save(buf, "PDF")
+    return buf.getvalue()
+
+
+def _capturing_parse(seen):
+    """A parser stub that records the first bytes of each file it's asked to read."""
+    def parse(pdf):
+        seen.append(Path(pdf).read_bytes()[:5])
+        return [_item()], 0.0, {"grand_total": 1.0}
+    return parse
+
+
+def test_a_pdf_is_recognised_by_its_contents_not_its_name():
+    with _folder({"real.pdf": _real_pdf_bytes(), "renamed.pdf": _jpeg_bytes()}) as root:
+        assert rf.is_real_pdf(root / "real.pdf")
+        assert not rf.is_real_pdf(root / "renamed.pdf")
+
+
+def test_a_photo_saved_as_pdf_is_listed_as_a_photo():
+    with _folder({"IMG_9.pdf": _jpeg_bytes()}) as root:
+        [receipt] = rf.review(root, set(), set())
+    assert receipt.kind == "photo" and receipt.pdf is None
+
+
+def test_a_photo_beside_its_renamed_copy_is_still_just_a_photo():
+    jpeg = _jpeg_bytes()
+    with _folder({"IMG_9.jpeg": jpeg, "IMG_9.pdf": jpeg}) as root:
+        [receipt] = rf.review(root, set(), set())
+    assert receipt.kind == "photo"
+
+
+def test_adding_a_renamed_photo_converts_it_and_keeps_the_photo():
+    svc = _sheet()
+    seen, jpeg = [], _jpeg_bytes()
+    with _folder({"IMG_9.pdf": jpeg}) as root:
+        data = _client(root, parse=_capturing_parse(seen)).post(
+            "/receipts/add", json={"reference": "IMG_9"}).get_json()
+        assert data["status"] == "added" and data["converted"]
+        assert rf.is_real_pdf(root / "IMG_9.pdf")
+        assert (root / "Originals" / "IMG_9.jpg").read_bytes() == jpeg
+    assert seen == [b"%PDF-"], "Claude must be handed a real PDF"
+    assert len(svc.appends) == 1
+
+
+def test_a_renamed_photo_whose_original_is_already_saved_is_replaced_without_a_duplicate():
+    jpeg = _jpeg_bytes()
+    _sheet()
+    with _folder({"IMG_9.pdf": jpeg, "Originals/IMG_9.jpeg": jpeg}) as root:
+        _client(root).post("/receipts/add", json={"reference": "IMG_9"})
+        assert rf.is_real_pdf(root / "IMG_9.pdf")
+        assert sorted(p.name for p in (root / "Originals").iterdir()) == ["IMG_9.jpeg"]
+
+
+def test_a_photo_beside_its_renamed_copy_ends_up_once_in_originals():
+    jpeg = _jpeg_bytes()
+    _sheet()
+    with _folder({"IMG_9.jpeg": jpeg, "IMG_9.pdf": jpeg}) as root:
+        _client(root).post("/receipts/add", json={"reference": "IMG_9"})
+        assert rf.is_real_pdf(root / "IMG_9.pdf")
+        assert sorted(p.name for p in (root / "Originals").iterdir()) == ["IMG_9.jpeg"]
+        assert sorted(p.name for p in root.iterdir() if p.is_file()) == ["IMG_9.pdf"]
+
+
+def test_a_pdf_named_file_that_is_neither_fails_without_losing_it():
+    svc = _sheet()
+    with _folder({"IMG_9.pdf": b"not a pdf or a photo"}) as root:
+        r = _client(root).post("/receipts/add", json={"reference": "IMG_9"})
+        assert r.status_code == 422
+        assert (root / "IMG_9.pdf").read_bytes() == b"not a pdf or a photo"
+        assert not (root / "Originals").exists()
+    assert svc.appends == []
+
+
+def test_an_uploaded_pdf_passes_through_unchanged():
+    pdf = _real_pdf_bytes()
+    assert rf.ensure_pdf_bytes(pdf) == (pdf, False)
+
+
+def test_an_uploaded_photo_named_pdf_is_converted_before_claude_reads_it():
+    data, converted = rf.ensure_pdf_bytes(_jpeg_bytes())
+    assert converted and data.startswith(b"%PDF-")
+
+
+def test_an_upload_that_is_neither_gets_a_clear_error():
+    try:
+        rf.ensure_pdf_bytes(b"not a pdf or a photo")
+    except rf.ConversionError as e:
+        assert "isn't a PDF" in str(e)
+    else:
+        raise AssertionError("expected ConversionError")
+
+
+def test_the_upload_step_converts_renamed_photos_and_says_so():
+    main_py = (Path(__file__).parent / "main.py").read_text()
+    assert "ensure_pdf_bytes(" in main_py and "upload_notice" in main_py
+    assert "upload_notice" in (TEMPLATES / "confirm.html").read_text()
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

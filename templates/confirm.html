@@ -116,6 +116,10 @@
   <div class="recon-banner {{ 'ok' if reconciliation.total_ok else 'warn' }}" id="recon-banner" style="margin-top:16px">Checking totals…</div>
   {% endif %}
 
+  {% if upload_notice %}
+  <div class="warning-banner" style="margin-top:16px">{{ upload_notice }}</div>
+  {% endif %}
+
   <div id="reused-banner" class="recon-banner ok" style="display:none; margin-top:16px">
     Using your saved reading of this receipt (no new Claude read). Items already submitted for a child start unchecked.
   </div>

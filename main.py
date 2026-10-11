@@ -18,7 +18,7 @@ from src.option_match import build_matches
 from src.pdf_downloader import download_invoices
 from src.receipt_parser import parse_receipt
 from src.sheets_logger import append_orders, get_existing_order_numbers
-from src import receipt_history, scholarship_year
+from src import receipt_folder, receipt_history, scholarship_year
 from src.submission_routes import bp as submission_bp
 from src.receipt_routes import bp as receipts_bp
 from src.note_routes import bp as notes_bp
@@ -61,6 +61,7 @@ def upload():
     data = file.read()
     sha = receipt_history.fingerprint(data)
     saved = receipt_history.saved_reading(sha)
+    session["upload_notice"] = ""
     if saved:
         # The same file was logged before, for another child. Reuse the items as
         # confirmed then -- same order, no second Claude read -- so the confirm
@@ -70,9 +71,22 @@ def upload():
         session["reconciliation"] = saved["reconciliation"]
         session["reused_reading"] = True
     else:
+        # A photo renamed to .pdf isn't a PDF, and Claude's API rejects it ("The
+        # PDF specified was not valid"). Convert it so it can be read, and say so:
+        # SUFS needs a real PDF too.
+        try:
+            pdf_data, was_photo = receipt_folder.ensure_pdf_bytes(data)
+        except receipt_folder.ConversionError as e:
+            return render_template("index.html", error=f"Failed to read receipt: {e}", options_discovered=load_form_options() is not None)
+        if was_photo:
+            session["upload_notice"] = (
+                f"{file.filename} is a photo saved with a .pdf name, not a real PDF, so the app "
+                "converted it to read it. SUFS needs a real PDF: run Review receipts folder to "
+                "convert the file in your receipts folder before uploading it to SUFS."
+            )
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         filepath = UPLOAD_DIR / secure_filename(file.filename)
-        filepath.write_bytes(data)
+        filepath.write_bytes(pdf_data)
         try:
             items, parse_cost, reconciliation = parse_receipt(str(filepath))
         except Exception as e:
@@ -106,6 +120,7 @@ def confirm():
         reconciliation=reconciliation,
         form_options_json=json.dumps(form_options) if form_options else "null",
         parse_cost=f"${parse_cost:.4f}" if parse_cost else None,
+        upload_notice=session.get("upload_notice", ""),
         enumerate=enumerate,
     )
 

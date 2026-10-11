@@ -418,6 +418,9 @@ receipt into:
 - **Can't process:** a file type it doesn't handle
 
 A receipt is a file *name*, so `IMG_1698.jpeg` and `IMG_1698.pdf` count once.
+PDFs are judged by their contents, not their names: a photo that was renamed to
+`.pdf` is treated as a photo and converted to a real PDF when you add it (the
+photo itself is kept in `Originals/`).
 
 For untracked receipts, check the ones you want, then click:
 
@@ -667,6 +670,13 @@ Open the reimbursement form as a tab in the SUFS Chrome window before clicking
 **Items aren't filling correctly**
 Click **Map options** on the home page with the SUFS form open, then try again.
 This re-reads the dropdown choices and usually fixes it.
+
+**"The PDF specified was not valid" (400) when parsing a receipt**
+The file is probably a photo that was renamed to `.pdf` rather than converted —
+its contents are still a JPEG. The upload page now converts such files before
+Claude reads them and shows a notice, but SUFS needs a real PDF too: run
+**Review receipts folder**, which converts renamed photos in place (the original
+photo is kept in `Originals/`). Never rename a photo to `.pdf` by hand.
 
 **"Gmail not authorized"**
 Click **Re-authorize Gmail** on the home page, or run

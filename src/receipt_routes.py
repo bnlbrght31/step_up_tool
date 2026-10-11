@@ -129,10 +129,19 @@ def receipts_add():
     if rf.classify(receipt, submitted, staged) != "untracked":
         return jsonify({"status": "already_tracked", "reference": receipt.reference})
 
+    # A photo saved under a .pdf name isn't a PDF; Claude rejects it. Turn it into
+    # a real one first (its photo is kept), then carry on as for any receipt.
+    try:
+        repaired = rf.repair_disguised_pdf(folder, receipt)
+    except rf.ConversionError as e:
+        return jsonify({"error": str(e)}), 422
+    if repaired:
+        receipt = rf.find_receipt(folder, receipt.reference)
+
     # Order matters: convert, read, append, then move the photos. A failure
     # partway leaves at most a new PDF beside the photo, which the next review
     # treats as a photo+pdf receipt.
-    pdf, converted = receipt.pdf, False
+    pdf, converted = receipt.pdf, repaired
     if pdf is None:
         try:
             pdf, converted = rf.to_pdf(receipt.images[0]), True

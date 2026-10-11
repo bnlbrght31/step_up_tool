@@ -9,6 +9,7 @@ shares a normalised name is one receipt, so IMG_1698.jpeg and IMG_1698.pdf
 count once.
 """
 
+import io
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -37,20 +38,48 @@ def _supported(path: Path) -> bool:
     return ext == PDF_EXT or ext in IMAGE_EXTS
 
 
+def is_real_pdf(path: Path) -> bool:
+    """True if the file's contents are a PDF, whatever its name says.
+
+    A photo renamed to .pdf isn't one: Claude's API rejects it ("The PDF
+    specified was not valid") and SUFS needs a real PDF too.
+    """
+    try:
+        with open(path, "rb") as f:
+            return b"%PDF-" in f.read(1024)
+    except OSError:
+        return False
+
+
 @dataclass
 class Receipt:
     reference: str               # file name without extension, as on disk
     files: list[Path] = field(default_factory=list)
     status: str = "untracked"    # submitted | staged | untracked | unsupported
     reason: str = ""
+    # Which .pdf files really are PDFs, checked once when the receipt is built, so
+    # the receipt describes the folder as it was reviewed and isn't re-read on
+    # every access.
+    real_pdfs: set[Path] = field(default_factory=set)
+
+    def __post_init__(self):
+        if not self.real_pdfs:
+            self.real_pdfs = {f for f in self.files if f.suffix.lower() == PDF_EXT and is_real_pdf(f)}
 
     @property
     def pdf(self) -> Path | None:
-        return next((f for f in self.files if f.suffix.lower() == PDF_EXT), None)
+        """The receipt's PDF, judged by its contents rather than its name."""
+        return next((f for f in self.files if f in self.real_pdfs), None)
+
+    @property
+    def disguised(self) -> list[Path]:
+        """Files named .pdf whose contents aren't a PDF -- usually a renamed photo."""
+        return [f for f in self.files if f.suffix.lower() == PDF_EXT and f not in self.real_pdfs]
 
     @property
     def images(self) -> list[Path]:
-        return sorted(f for f in self.files if f.suffix.lower() in IMAGE_EXTS)
+        """The receipt's photos, including any saved under a .pdf name."""
+        return sorted([f for f in self.files if f.suffix.lower() in IMAGE_EXTS] + self.disguised)
 
     @property
     def kind(self) -> str:
@@ -139,24 +168,94 @@ class ConversionError(Exception):
     """An image couldn't be turned into a PDF."""
 
 
-def to_pdf(image_path: Path) -> Path:
-    """Write <stem>.pdf beside `image_path` and return its path.
+def _pdf_bytes_from_image(source) -> bytes:
+    """A photo (path or file object) as PDF bytes: the phone's rotation applied,
+    the long edge shrunk to MAX_EDGE (never enlarged)."""
+    with Image.open(source) as im:
+        page = ImageOps.exif_transpose(im)
+        page.thumbnail((MAX_EDGE, MAX_EDGE))
+        buf = io.BytesIO()
+        page.convert("RGB").save(buf, "PDF", quality=JPEG_QUALITY, resolution=PDF_DPI)
+        return buf.getvalue()
 
-    Applies the phone's rotation, shrinks the long edge to MAX_EDGE (never
-    enlarging), and never overwrites an existing file.
+
+def to_pdf(image_path: Path, out: Path | None = None) -> Path:
+    """Write the photo as a PDF (default <stem>.pdf beside it) and return its path.
+
+    Never overwrites an existing file.
     """
-    out = image_path.with_suffix(PDF_EXT)
+    out = out or image_path.with_suffix(PDF_EXT)
     if out.exists():
         raise ConversionError(f"{out.name} already exists")
     try:
-        with Image.open(image_path) as im:
-            page = ImageOps.exif_transpose(im)
-            page.thumbnail((MAX_EDGE, MAX_EDGE))
-            page.convert("RGB").save(out, "PDF", quality=JPEG_QUALITY, resolution=PDF_DPI)
+        data = _pdf_bytes_from_image(image_path)
     except Exception as e:
-        out.unlink(missing_ok=True)
         raise ConversionError(f"Couldn't convert {image_path.name}: {e}") from e
+    out.write_bytes(data)
     return out
+
+
+def ensure_pdf_bytes(data: bytes) -> tuple[bytes, bool]:
+    """(PDF bytes, whether they were converted) for an uploaded receipt.
+
+    A real PDF passes through untouched. A photo -- often one renamed to .pdf --
+    is converted the same way the folder review converts photos.
+    """
+    if b"%PDF-" in data[:1024]:
+        return data, False
+    try:
+        return _pdf_bytes_from_image(io.BytesIO(data)), True
+    except Exception as e:
+        raise ConversionError(f"This file isn't a PDF, and it isn't a photo the app can read ({e}).") from e
+
+
+_PHOTO_EXT = {"JPEG": ".jpg", "PNG": ".png", "HEIF": ".heic"}
+
+
+def repair_disguised_pdf(folder: Path, receipt: Receipt) -> bool:
+    """Turn a photo saved under a .pdf name into a real PDF at the same path.
+
+    The photo's bytes are never lost: if an identical copy already exists (beside
+    it or in Originals/), the renamed file is simply replaced; otherwise it is
+    first moved into Originals/ under its real extension. Returns True if a file
+    was repaired. Raises ConversionError, changing nothing, if the file is
+    neither a PDF nor a photo the app can read.
+    """
+    if not receipt.disguised:
+        return False
+    fake = receipt.disguised[0]
+    try:
+        with Image.open(fake) as im:
+            fmt = im.format
+    except Exception as e:
+        raise ConversionError(f"{fake.name} isn't a PDF, and it isn't a photo the app can read ({e}).") from e
+
+    data = fake.read_bytes()
+    originals = folder / ORIGINALS
+    candidates = [f for f in receipt.files if f != fake]
+    if originals.is_dir():
+        candidates += sorted(p for p in originals.iterdir() if p.stem == fake.stem)
+    twin = next((c for c in candidates if c.is_file() and c.stat().st_size == len(data)
+                 and c.read_bytes() == data), None)
+
+    if twin is not None:
+        try:
+            fake.write_bytes(_pdf_bytes_from_image(twin))    # the photo survives as its twin
+        except Exception as e:
+            fake.write_bytes(data)
+            raise ConversionError(f"Couldn't convert {fake.name}: {e}") from e
+        return True
+
+    originals.mkdir(exist_ok=True)
+    kept = _free_name(originals / f"{fake.stem}{_PHOTO_EXT.get(fmt, '.img')}")
+    fake.rename(kept)
+    try:
+        fake.write_bytes(_pdf_bytes_from_image(kept))
+    except Exception as e:
+        fake.unlink(missing_ok=True)
+        kept.rename(fake)                                     # put the photo back as it was
+        raise ConversionError(f"Couldn't convert {fake.name}: {e}") from e
+    return True
 
 
 # ---------------------------------------------------------------------------
